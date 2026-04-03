@@ -1,0 +1,20 @@
+# Environment and secrets
+.env
+*.key
+*.json
+!requirements.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
