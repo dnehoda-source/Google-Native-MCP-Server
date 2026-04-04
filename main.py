@@ -888,24 +888,11 @@ def update_soar_case(
 # STARLETTE APP WITH SSE TRANSPORT
 # ═══════════════════════════════════════════════════════════════
 
-from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
-from starlette.routing import Route, Mount
+from starlette.routing import Route
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
-sse = SseServerTransport("/messages/")
-
-async def handle_sse(request: StarletteRequest):
-    async with sse.connect_sse(
-        request.scope, request.receive, request._send
-    ) as streams:
-        await app_mcp._mcp_server.run(
-            streams[0], streams[1], app_mcp._mcp_server.create_initialization_options()
-        )
-
-async def handle_messages(request: StarletteRequest):
-    await sse.handle_post_message(request.scope, request.receive, request._send)
 
 async def health_check(request: StarletteRequest):
     health = {
@@ -926,13 +913,34 @@ async def health_check(request: StarletteRequest):
     }
     return JSONResponse(health)
 
-app = Starlette(
-    routes=[
-        Route("/health", endpoint=health_check),
-        Route("/sse", endpoint=handle_sse),
-        Mount("/messages", app=sse.handle_post_message),
-    ]
-)
+
+def create_app():
+    """Create the Starlette ASGI app with SSE transport for MCP."""
+    from mcp.server.sse import SseServerTransport
+    from starlette.routing import Mount
+
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request: StarletteRequest):
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send
+        ) as (read_stream, write_stream):
+            await app_mcp._mcp_server.run(
+                read_stream,
+                write_stream,
+                app_mcp._mcp_server.create_initialization_options(),
+            )
+
+    return Starlette(
+        routes=[
+            Route("/health", endpoint=health_check),
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse.handle_post_message),
+        ]
+    )
+
+
+app = create_app()
 
 if __name__ == "__main__":
     import uvicorn

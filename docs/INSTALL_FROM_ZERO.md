@@ -1,107 +1,149 @@
-# 🚀 From GitHub to Cloud Run — The "Explain It Like I'm 5" Install Guide
+# 🚀 From GitHub to Cloud Run — The Complete Install Guide
 
 ## What You're Building
 
-You're taking code from GitHub, putting it in a box (Docker container), and running that box on Google's cloud (Cloud Run). When it's done, you'll have a URL that any AI can talk to — and that AI will be able to search your SIEM, check your threat intel, isolate endpoints, and purge phishing emails.
+You're taking code from the internet (GitHub), putting it in a box (Docker container), and running that box on Google's servers (Cloud Run). When you're done, you get a URL. Any AI that knows how to speak MCP can use that URL to search your SIEM, enrich threat intel, isolate endpoints, purge phishing emails, and more.
 
-**Total time:** 15–20 minutes if everything goes smoothly.
+**Total time:** 20–30 minutes, start to finish.
+
+**Total cost:** Free while idle. ~$5/month with moderate use.
 
 ---
 
 ## What You Need Before Starting
 
-Check each box. If any are missing, follow the "How to get it" link.
+You need 3 things. If you're missing any of them, follow the instructions below to get them.
 
-- [ ] **A Google Cloud account with billing enabled**
-  - How to get it: https://console.cloud.google.com → Sign up → Add a credit card
-  - You won't be charged much (< $5/month for this server)
+### Thing 1: A Google Cloud Account
 
-- [ ] **A Google Cloud project**
-  - How to get it: https://console.cloud.google.com → Click the project dropdown at the top → "New Project" → Name it anything (e.g., `secops-mcp`) → Create
+This is how you pay for Google Cloud services (like Cloud Run).
 
-- [ ] **Google SecOps (Chronicle) instance**
-  - You should already have this if you're reading this guide
-  - You'll need your **Customer ID** (a UUID) — find it in SecOps Console → Settings → SIEM Settings
+**Already have one?** Go to https://console.cloud.google.com — if you can log in, you're good. Skip to Thing 2.
 
-- [ ] **A computer with a terminal** (Mac Terminal, Linux terminal, or Windows PowerShell)
+**Don't have one?** Here's how to create it:
 
-That's it. Everything else gets installed in the steps below.
+1. Go to **https://cloud.google.com** in your browser
+2. Click **"Get started for free"** (top right)
+3. Sign in with your Google account (the same one you use for Gmail)
+4. Google gives you **$300 in free credits** for 90 days — more than enough
+5. You need to add a credit card, but you **won't be charged** unless you manually upgrade to a paid account
+6. Fill out the billing info and click **"Start Free"**
 
----
+You now have a Google Cloud account.
 
-## Step 1: Install the Google Cloud CLI
+### Thing 2: A Google Cloud Project
 
-This is the tool that lets you talk to Google Cloud from your terminal.
+A "project" is like a folder that holds all your cloud resources. Every API, every server, every secret lives inside a project.
 
-### Mac
+**Create one:**
+
+1. Go to **https://console.cloud.google.com**
+2. At the very top of the page, you'll see a dropdown next to "Google Cloud" — it might say "Select a project" or show an existing project name
+3. Click that dropdown
+4. Click **"NEW PROJECT"** (top right of the popup)
+5. **Project name:** Type something like `secops-mcp` (lowercase, no spaces)
+6. **Organization:** Leave as default (or pick yours if you see one)
+7. Click **"CREATE"**
+8. Wait 10 seconds. It'll say "Your new project is ready."
+9. Click **"SELECT PROJECT"** to switch to it
+
+**Write down your Project ID.** It's shown under the project name (looks like `secops-mcp` or `secops-mcp-123456`). You'll need this later.
+
+### Thing 3: The `gcloud` Command Line Tool
+
+This is the tool that lets you control Google Cloud from your terminal (instead of clicking around the website).
+
+**Check if you already have it:**
+```bash
+gcloud version
+```
+If you see version numbers, skip to Step 1. If you see "command not found," install it:
+
+**Mac:**
 ```bash
 brew install google-cloud-sdk
 ```
-Don't have brew? Install it first: https://brew.sh
+Don't have `brew`? Go to https://brew.sh and follow the one-line install, then come back.
 
-### Linux (Ubuntu/Debian)
+**Linux (Ubuntu/Debian):**
 ```bash
 sudo apt-get update
 sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+
 curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+
 echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+
 sudo apt-get update
 sudo apt-get install -y google-cloud-cli
 ```
 
-### Windows
-Download the installer: https://cloud.google.com/sdk/docs/install#windows
+**Windows:**
+1. Go to **https://cloud.google.com/sdk/docs/install#windows**
+2. Download the installer
+3. Run it. Click Next through everything.
+4. At the end, check "Run gcloud init" and click Finish
 
-### Verify It Works
+**Verify it works:**
 ```bash
 gcloud version
 ```
-You should see a version number. If you see "command not found," the install failed — try again.
+You should see something like `Google Cloud SDK 470.0.0`. The exact version doesn't matter.
 
 ---
 
-## Step 2: Log In to Google Cloud
+## Step 1: Log In to Google Cloud
+
+Open your terminal and run:
 
 ```bash
 gcloud auth login
 ```
 
-**What happens:** Your browser opens. Sign in with your Google account. Click "Allow."
+**What happens:** Your web browser opens automatically. Sign in with the same Google account you used to create the Cloud account. Click **"Allow"** when Google asks for permissions.
 
-Then set your project:
+Your terminal will say: `You are now logged in as [your-email@gmail.com]`
+
+Now tell gcloud which project to use:
+
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-Replace `YOUR_PROJECT_ID` with the project you created (e.g., `secops-mcp`). 
+**Replace `YOUR_PROJECT_ID`** with the Project ID you wrote down in Thing 2 (e.g., `secops-mcp`).
 
-**Not sure what your project ID is?** Run:
+**Not sure what your Project ID is?** Run:
 ```bash
 gcloud projects list
 ```
+It shows all your projects. Copy the one you want and use it.
 
 ---
 
-## Step 3: Download the Code from GitHub
+## Step 2: Download the Code
 
-You have two options. Pick whichever is easier for you.
+You need to get the MCP Server code from GitHub onto your computer. Pick the easiest option for you:
 
-### Option A: Download as a ZIP (Easiest — No Git Required)
+### Option A: Download as ZIP (No Git Required — Easiest)
 
-1. Open your browser and go to: **https://github.com/dnehoda-source/Google-Native-MCP-Server**
-2. Look for the big green button that says **"<> Code"** — click it
-3. In the dropdown menu, click **"Download ZIP"**
-4. Your browser downloads a file called `Google-Native-MCP-Server-main.zip`
-5. Find it in your Downloads folder and **unzip it** (double-click on Mac/Windows, or `unzip` on Linux)
-6. Open your terminal and navigate to the unzipped folder:
+1. Open your browser
+2. Go to: **https://github.com/dnehoda-source/Google-Native-MCP-Server**
+3. Look for the big green button that says **"<> Code"**
+4. Click it
+5. In the dropdown, click **"Download ZIP"**
+6. Your browser downloads a file called `Google-Native-MCP-Server-main.zip`
+7. Find it in your **Downloads** folder
+8. **Unzip it:**
+   - **Mac:** Double-click the ZIP file
+   - **Windows:** Right-click → "Extract All"
+   - **Linux:** `unzip Google-Native-MCP-Server-main.zip`
+9. Open your terminal and go to the folder:
 
 ```bash
 cd ~/Downloads/Google-Native-MCP-Server-main
 ```
 
-That's it. You have the code.
-
-### Option B: Use Git (If You Have It Installed)
+### Option B: Use Git Clone
 
 ```bash
 cd ~/Desktop
@@ -109,32 +151,25 @@ git clone https://github.com/dnehoda-source/Google-Native-MCP-Server.git
 cd Google-Native-MCP-Server
 ```
 
-**Don't have git and want to install it?**
-- Mac: `xcode-select --install`
-- Linux: `sudo apt install git`
-- Windows: https://git-scm.com/download/win
-
-**Not sure if you have git?** Type `git --version` in your terminal. If you see a version number, you have it. If you see "command not found," use Option A.
+**Don't have git?** Just use Option A. It's the same code.
 
 ---
 
-## Step 4: Enable the Required Google APIs
+## Step 3: Turn On the Google Cloud Services
 
-Google Cloud has hundreds of services. They're all turned off by default. We need to turn on the 7 that our server uses.
+Google Cloud has hundreds of services, but they're all turned off by default. Your MCP server needs 7 of them. Here's what each one does:
 
-Here's what each one does:
-
-| API | What It Does | Why We Need It |
+| Service | What It Is | Why Your Server Needs It |
 |---|---|---|
-| `run.googleapis.com` | **Cloud Run** — runs your server in the cloud | This is where your MCP server lives |
-| `cloudbuild.googleapis.com` | **Cloud Build** — builds your Docker container | Packages your code into a container without needing Docker on your machine |
-| `secretmanager.googleapis.com` | **Secret Manager** — stores API keys securely | Holds your VirusTotal/GTI API key so it's not in plain text |
-| `securitycenter.googleapis.com` | **Security Command Center** — vulnerability scanner | The `get_scc_findings` tool queries this |
-| `logging.googleapis.com` | **Cloud Logging** — audit logs | The `query_cloud_logging` tool queries this |
-| `aiplatform.googleapis.com` | **Vertex AI** — Google's AI platform | The `vertex_ai_investigate` tool uses Gemini through this |
-| `chronicle.googleapis.com` | **Google SecOps (Chronicle)** — your SIEM | The UDM search, detections, Data Tables, and rules tools all use this |
+| **Cloud Run** | Runs your server in the cloud | This is where your MCP server actually lives and runs |
+| **Cloud Build** | Builds Docker containers in the cloud | Takes your code and packages it — you don't need Docker on your computer |
+| **Secret Manager** | Stores passwords and API keys securely | Holds your VirusTotal API key so it's encrypted, not in plain text |
+| **Security Command Center** | Google's vulnerability scanner | The `get_scc_findings` tool queries this to find misconfigurations |
+| **Cloud Logging** | Stores audit logs for everything in your GCP project | The `query_cloud_logging` tool searches IAM changes, compute events, etc. |
+| **Vertex AI** | Google's AI platform (Gemini) | The `vertex_ai_investigate` tool uses Gemini to analyze security findings |
+| **Chronicle API** | Google SecOps (your SIEM) | The UDM search, detections, Data Tables, and rule management tools all use this |
 
-Copy and paste this one command to turn them all on:
+Turn them all on with one command:
 
 ```bash
 gcloud services enable \
@@ -147,83 +182,128 @@ gcloud services enable \
     chronicle.googleapis.com
 ```
 
-**What happens:** Google turns on all 7 services. Takes about 30 seconds. You'll see "Operation finished successfully" for each one.
+**What happens:** Google turns on each service. You'll see "Operation finished successfully" for each one. Takes about 30 seconds total.
 
-**If you see "PERMISSION_DENIED":** You need to be a Project Owner or Editor. Ask whoever created the project to give you access.
+**If you see "PERMISSION_DENIED":** You're not a Project Owner or Editor. Either:
+- Ask your GCP admin to grant you the **Editor** role on the project
+- Or ask them to run this command for you
 
 ---
 
-## Step 5: Create a Service Account
+## Step 4: Create a Service Account
 
-The server needs an identity to talk to Google's APIs. That identity is called a "service account."
+Your server needs an identity to talk to Google's APIs. In Google Cloud, that identity is called a "service account." Think of it as a username and password that belongs to the server, not to you.
+
+### Create it:
 
 ```bash
 gcloud iam service-accounts create native-mcp-sa \
     --display-name="MCP Server Service Account"
 ```
 
-Now give it permission to read your security data:
+**If you see "already exists":** That's fine. It was created before. Keep going.
+
+### Give it permissions:
+
+Now we tell Google what this service account is allowed to do. We're giving it **read-only** access to your security tools — it can look at data but can't change anything.
 
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
+SA_EMAIL="native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
+# Permission to read SecOps data (UDM search, detections, rules)
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/chronicle.viewer" --quiet
 
+# Permission to read Security Command Center findings
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/securitycenter.findingsViewer" --quiet
 
+# Permission to read Cloud Logging entries
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/logging.viewer" --quiet
 
+# Permission to use Vertex AI (Gemini)
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/aiplatform.user" --quiet
 ```
 
-**What happens:** You created a service account and gave it read-only access to your security tools. It can look but not touch.
+**What each permission does:**
 
-**If you see "already exists":** That's fine — it was created before. Move on.
+| Permission | English Translation |
+|---|---|
+| `chronicle.viewer` | "You can search the SIEM and read detections, but you can't create or delete rules" |
+| `securitycenter.findingsViewer` | "You can see vulnerabilities, but you can't dismiss or modify them" |
+| `logging.viewer` | "You can read audit logs, but you can't delete them" |
+| `aiplatform.user` | "You can ask Gemini questions, but you can't deploy models" |
 
 ---
 
-## Step 6: Add Your VirusTotal API Key (Optional)
+## Step 5: Add Your VirusTotal API Key (Optional But Recommended)
 
-This lets the server look up IPs, domains, and file hashes in VirusTotal. Skip this step if you don't have a VT key.
+This lets the server look up IPs, domains, and file hashes in VirusTotal. **Skip this step if you don't have a VT account.**
 
-**Get a free key:** https://www.virustotal.com/gui/join-us → Sign up → Profile → API Key
+### Get a free VirusTotal API key:
+
+1. Go to **https://www.virustotal.com/gui/join-us**
+2. Create an account (free)
+3. Once logged in, click your avatar (top right) → **"API Key"**
+4. Copy the long string of letters and numbers — that's your key
+
+### Store it securely in Google Cloud:
 
 ```bash
-echo -n "YOUR_VT_API_KEY_HERE" | gcloud secrets create gti-api-key \
+echo -n "PASTE_YOUR_API_KEY_HERE" | gcloud secrets create gti-api-key \
     --data-file=- \
     --replication-policy="automatic"
 ```
 
-Replace `YOUR_VT_API_KEY_HERE` with your actual key.
+**Replace `PASTE_YOUR_API_KEY_HERE`** with the actual key you just copied. Keep the quotes.
 
-Now let the service account read it:
+Now let the service account read the secret:
 
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
+SA_EMAIL="native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
 gcloud secrets add-iam-policy-binding gti-api-key \
-    --member="serviceAccount:native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/secretmanager.secretAccessor" --quiet
 ```
 
-**If you see "already exists":** The secret was created before. To update it:
+**If you see "already exists":** The secret was created before. To update it with a new key:
 ```bash
 echo -n "YOUR_NEW_KEY" | gcloud secrets versions add gti-api-key --data-file=-
 ```
 
 ---
 
+## Step 6: Find Your SecOps Customer ID
+
+Your MCP server needs to know which SecOps instance to connect to. That's identified by a "Customer ID."
+
+### How to find it:
+
+1. Open **Google SecOps** in your browser (the Chronicle console)
+2. Click the **gear icon** (Settings) in the bottom-left
+3. Click **"SIEM Settings"**
+4. Look for **"Customer ID"** — it's a long string that looks like: `1d49deb2eaa7427ca1d1e78ccaa91c10`
+5. **Copy it.** You'll paste it in the next step.
+
+**Also note your region:**
+- If your SecOps URL contains `us-chronicle` → your region is `us`
+- If it contains `europe-chronicle` → your region is `europe`
+- If it contains `asia-chronicle` → your region is `asia`
+
+---
+
 ## Step 7: Build the Container
 
-This is where Google takes your code and packages it into a Docker container — in the cloud. You don't need Docker installed on your computer for this step.
+This is where Google takes your code and packages it into a Docker container. **This happens in Google's cloud — you don't need Docker installed on your computer.**
 
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
@@ -231,61 +311,78 @@ PROJECT_ID=$(gcloud config get-value project)
 gcloud builds submit --tag gcr.io/${PROJECT_ID}/google-native-mcp:latest
 ```
 
-**What happens:** 
-1. Google uploads your code (~50KB)
-2. Google builds the Docker container in their cloud
-3. Google stores the container in your project's Container Registry
+**What happens:**
+1. Google uploads your code files (~50KB — takes a few seconds)
+2. Google reads the `Dockerfile` and installs all the Python packages
+3. Google saves the finished container to your project's Container Registry
 
-**This takes 2–5 minutes.** You'll see lots of output. Wait for:
+**This takes 2–5 minutes.** You'll see a lot of text scrolling by. That's normal. Wait for the final line:
+
 ```
 DONE
 ```
 
-**If you see "PERMISSION_DENIED" or "Cloud Build API has not been enabled":**
-Go back to Step 4 and make sure you enabled `cloudbuild.googleapis.com`.
+**If you see an error about "Cloud Build API":** Go back to Step 3 and make sure you enabled `cloudbuild.googleapis.com`.
+
+**If you see a Python error about "mcp" or "requirements":** The `requirements.txt` file might be out of date. This shouldn't happen with the latest code, but if it does, let me know.
 
 ---
 
 ## Step 8: Deploy to Cloud Run
 
-This is the big one. This takes the container you just built and runs it on Google's servers.
+This is the big moment. This command takes the container you just built and runs it on Google's servers, giving you a live URL.
 
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
-SECOPS_CUSTOMER_ID="YOUR_CUSTOMER_ID_HERE"
+SA_EMAIL="native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+SECOPS_CUSTOMER_ID="PASTE_YOUR_CUSTOMER_ID_HERE"
+SECOPS_REGION="us"
 
 gcloud run deploy google-native-mcp \
     --image gcr.io/${PROJECT_ID}/google-native-mcp:latest \
     --region us-central1 \
-    --service-account native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+    --service-account ${SA_EMAIL} \
     --no-allow-unauthenticated \
     --memory 512Mi \
     --cpu 1 \
     --min-instances 0 \
     --max-instances 10 \
     --timeout 120 \
-    --set-env-vars="SECOPS_PROJECT_ID=${PROJECT_ID},SECOPS_CUSTOMER_ID=${SECOPS_CUSTOMER_ID},SECOPS_REGION=us" \
+    --set-env-vars="SECOPS_PROJECT_ID=${PROJECT_ID},SECOPS_CUSTOMER_ID=${SECOPS_CUSTOMER_ID},SECOPS_REGION=${SECOPS_REGION}" \
     --quiet
 ```
 
-⚠️ **Replace `YOUR_CUSTOMER_ID_HERE`** with your actual SecOps Customer ID (the UUID from SecOps Settings → SIEM Settings).
+⚠️ **Before you paste this:** Replace `PASTE_YOUR_CUSTOMER_ID_HERE` with the Customer ID you copied in Step 6.
 
-**What happens:**
-1. Google creates a new Cloud Run service
-2. It starts your container
-3. It gives you a URL
+⚠️ **If your SecOps region isn't `us`:** Change `SECOPS_REGION="us"` to `"europe"` or `"asia"`.
 
-You'll see something like:
+**What each flag means (you don't need to change these):**
+
+| Flag | What It Does |
+|---|---|
+| `--image` | Points to the container you built in Step 7 |
+| `--region us-central1` | Runs the server in Google's Iowa data center (cheapest) |
+| `--service-account` | Tells the server to use the identity you created in Step 4 |
+| `--no-allow-unauthenticated` | Requires a valid token to access (security!) |
+| `--memory 512Mi` | Gives the server 512MB of RAM (plenty for API proxying) |
+| `--min-instances 0` | Server sleeps when no one is using it ($0 when idle!) |
+| `--max-instances 10` | Caps at 10 copies if many people use it at once |
+| `--timeout 120` | Allows requests to take up to 2 minutes (some SecOps queries are slow) |
+
+**What happens:** Google creates your Cloud Run service and gives you a URL. You'll see:
+
 ```
 Service [google-native-mcp] revision [google-native-mcp-00001-abc] has been deployed
 Service URL: https://google-native-mcp-abc123-uc.a.run.app
 ```
 
-**Copy that URL.** That's your MCP server.
+🎉 **That URL is your MCP server.** Copy it. Save it. Bookmark it.
 
 ---
 
-## Step 9: Add the VirusTotal Secret (If You Did Step 6)
+## Step 9: Add the VirusTotal Secret (If You Did Step 5)
+
+If you stored a VT API key in Step 5, connect it to your running server:
 
 ```bash
 gcloud run services update google-native-mcp \
@@ -293,9 +390,13 @@ gcloud run services update google-native-mcp \
     --set-secrets="GTI_API_KEY=gti-api-key:latest"
 ```
 
+Skipped Step 5? Skip this step too.
+
 ---
 
-## Step 10: Test It
+## Step 10: Test It!
+
+Let's make sure everything works.
 
 ```bash
 SERVICE_URL=$(gcloud run services describe google-native-mcp \
@@ -314,7 +415,7 @@ curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
     "server": "google-native-mcp",
     "version": "2.0.0",
     "tools": 22,
-    "project": "your-project-id",
+    "project": "secops-mcp",
     "region": "us",
     "integrations": {
         "gti": true,
@@ -327,17 +428,24 @@ curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
 }
 ```
 
-**If you see `"status": "healthy"` — YOU'RE DONE. 🎉**
+**What this means:**
+- `"status": "healthy"` → ✅ Your server is running!
+- `"tools": 22` → ✅ All 22 security tools are loaded
+- `"gti": true` → ✅ VirusTotal integration is working (false if you skipped Step 5)
+- `"o365": false` → That's fine — you haven't configured O365 integration yet
+- Other `false` values → Also fine — those integrations are optional
 
-The `false` values for O365, Okta, etc. are normal — those integrations are optional. The server works without them; those specific tools just won't be available until you add the credentials.
+### 🎉 IF YOU SEE "healthy" — CONGRATULATIONS. YOU'RE DONE.
+
+Your autonomous security operations server is live on Google Cloud. It costs $0 when nobody is using it, and scales automatically when someone does.
 
 ---
 
-## Step 11: Connect an MCP Client
+## Step 11: Connect an AI to Your Server
 
-Your server is running. Now you need something to talk to it.
+Your server is running, but it's just sitting there waiting. You need to connect an AI client to actually use the 22 tools.
 
-### Option A: Claude Code (Easiest)
+### Option A: Claude Code (If You Use Claude)
 
 ```bash
 SERVICE_URL=$(gcloud run services describe google-native-mcp \
@@ -347,122 +455,152 @@ SERVICE_URL=$(gcloud run services describe google-native-mcp \
 claude mcp add google-security --transport sse ${SERVICE_URL}/sse
 ```
 
-Now when you use Claude Code, it has access to all 22 security tools.
+Now every time you use Claude Code, it can access all 22 security tools.
 
-### Option B: Any MCP Client
+### Option B: Any MCP-Compatible Client
 
-Use these endpoints:
-- **SSE Connection:** `https://YOUR_SERVICE_URL/sse`
-- **Health Check:** `https://YOUR_SERVICE_URL/health`
+Your server's endpoints:
 
-All requests need an `Authorization: Bearer TOKEN` header. Get a token with:
+| Endpoint | What It's For |
+|---|---|
+| `https://YOUR_URL/health` | Health check (test with curl) |
+| `https://YOUR_URL/sse` | MCP client connection (SSE streaming) |
+
+Every request needs an authorization header:
+```
+Authorization: Bearer YOUR_TOKEN
+```
+
+Get a token with:
 ```bash
 gcloud auth print-identity-token
 ```
 
 ---
 
-## 🎉 You're Done!
+## How to See Your Server in the Google Cloud Console
 
-**What you have now:**
-- A server running on Google Cloud (Cloud Run)
-- 22 security tools accessible via MCP
-- Automatic scaling (0 instances when idle = $0, scales up when used)
-- Zero embedded secrets (Workload Identity handles everything)
-- A health check endpoint to verify it's working
+Want to see your server in a web browser instead of the terminal?
 
-**Monthly cost:** $0 when idle. ~$5–$20/month with moderate usage. Cloud Run only charges when the server is actively handling requests.
+1. Go to **https://console.cloud.google.com/run**
+2. Make sure your project is selected at the top
+3. You'll see `google-native-mcp` in the list
+4. Click on it to see:
+   - The URL
+   - How many requests it's handling
+   - Logs (what the server is doing)
+   - Metrics (CPU, memory, response times)
 
 ---
 
-## Troubleshooting — When Things Go Wrong
+## How to Update Your Server Later
 
-### "PERMISSION_DENIED" on any step
-
-You need more permissions on the GCP project. Ask the project owner to grant you the **Editor** role:
+If the code gets updated on GitHub:
 
 ```bash
-gcloud projects add-iam-policy-binding YOUR_PROJECT \
-    --member="user:YOUR_EMAIL" \
-    --role="roles/editor"
-```
+cd ~/Desktop/Google-Native-MCP-Server    # or wherever you downloaded it
+git pull                                   # get the latest code
 
-### "Cloud Build" fails during Step 7
-
-**Most common cause:** A typo in requirements.txt or main.py. Run this to see the build log:
-```bash
-gcloud builds list --limit=1
-gcloud builds log $(gcloud builds list --limit=1 --format="value(id)")
-```
-
-The error message will tell you exactly what went wrong.
-
-### Health check returns "degraded" or ADC error
-
-The service account doesn't have the right permissions. Re-run Step 5 (the IAM binding commands).
-
-### curl returns "403 Forbidden"
-
-Your identity token expired. Get a fresh one:
-```bash
-curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" ${SERVICE_URL}/health
-```
-
-### curl returns "Connection refused"
-
-The service might be sleeping (min-instances = 0). The first request takes 2–3 seconds to wake it up. Try again.
-
-### I want to update the code
-
-```bash
-cd ~/Desktop/Google-Native-MCP-Server
-git pull  # get latest code
+PROJECT_ID=$(gcloud config get-value project)
 gcloud builds submit --tag gcr.io/${PROJECT_ID}/google-native-mcp:latest
 gcloud run deploy google-native-mcp \
     --image gcr.io/${PROJECT_ID}/google-native-mcp:latest \
     --region us-central1
 ```
 
-That's it — zero-downtime update.
+That rebuilds the container and redeploys. Zero downtime — the old version keeps running until the new one is ready.
 
-### I want to delete everything
+---
+
+## How to Delete Everything (Clean Removal)
+
+If you want to remove the server completely:
 
 ```bash
-gcloud run services delete google-native-mcp --region us-central1
-gcloud iam service-accounts delete native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com
-gcloud secrets delete gti-api-key
+PROJECT_ID=$(gcloud config get-value project)
+
+# Delete the Cloud Run service
+gcloud run services delete google-native-mcp --region us-central1 --quiet
+
+# Delete the service account
+gcloud iam service-accounts delete native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com --quiet
+
+# Delete the VT API key secret (if you created one)
+gcloud secrets delete gti-api-key --quiet
+```
+
+After this, nothing remains. No charges. No resources. Clean slate.
+
+---
+
+## Troubleshooting — When Things Go Wrong
+
+### "gcloud: command not found"
+You haven't installed the Google Cloud CLI. Go back to "Thing 3" at the top.
+
+### "PERMISSION_DENIED" on anything
+You don't have enough permissions on the GCP project. You need to be a **Project Owner** or **Editor**. Ask your admin to run:
+```bash
+gcloud projects add-iam-policy-binding YOUR_PROJECT \
+    --member="user:YOUR_EMAIL" \
+    --role="roles/editor"
+```
+
+### Cloud Build fails
+Look at the error message. The most common cause is a Python dependency issue. Run this to see the build log:
+```bash
+gcloud builds list --limit=1
+gcloud builds log $(gcloud builds list --limit=1 --format="value(id)")
+```
+
+### Health check returns "degraded"
+The service account doesn't have the right permissions. Re-run the permission commands in Step 4.
+
+### curl returns "403 Forbidden"
+Your identity token expired (they last 1 hour). Get a fresh one:
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" ${SERVICE_URL}/health
+```
+
+### curl returns "Connection refused" or times out
+The server might be sleeping (min-instances = 0). The first request takes 2–3 seconds to "wake up" the server. Try again — the second request will be fast.
+
+### I changed my SecOps Customer ID and need to update
+```bash
+gcloud run services update google-native-mcp \
+    --region us-central1 \
+    --set-env-vars="SECOPS_CUSTOMER_ID=your-new-customer-id"
 ```
 
 ---
 
-## The Whole Thing in 30 Seconds
+## The Speed Run (For People Who Don't Need Hand-Holding)
+
+The entire deployment in one block:
 
 ```bash
-# 1. Login
+# Setup
 gcloud auth login
-gcloud config set project YOUR_PROJECT
-
-# 2. Get the code
+gcloud config set project YOUR_PROJECT_ID
 git clone https://github.com/dnehoda-source/Google-Native-MCP-Server.git
 cd Google-Native-MCP-Server
 
-# 3. Enable APIs
+# Enable APIs
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com securitycenter.googleapis.com logging.googleapis.com aiplatform.googleapis.com chronicle.googleapis.com
 
-# 4. Create service account + permissions
+# Service account
 gcloud iam service-accounts create native-mcp-sa --display-name="MCP Server"
 PROJECT_ID=$(gcloud config get-value project)
+SA_EMAIL="native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 for ROLE in roles/chronicle.viewer roles/securitycenter.findingsViewer roles/logging.viewer roles/aiplatform.user; do
-    gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com" --role="$ROLE" --quiet
+    gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${SA_EMAIL}" --role="$ROLE" --quiet
 done
 
-# 5. Build + Deploy
+# Build + Deploy
 gcloud builds submit --tag gcr.io/${PROJECT_ID}/google-native-mcp:latest
-gcloud run deploy google-native-mcp --image gcr.io/${PROJECT_ID}/google-native-mcp:latest --region us-central1 --service-account native-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com --no-allow-unauthenticated --memory 512Mi --set-env-vars="SECOPS_PROJECT_ID=${PROJECT_ID},SECOPS_CUSTOMER_ID=YOUR_CUSTOMER_ID,SECOPS_REGION=us" --quiet
+gcloud run deploy google-native-mcp --image gcr.io/${PROJECT_ID}/google-native-mcp:latest --region us-central1 --service-account ${SA_EMAIL} --no-allow-unauthenticated --memory 512Mi --set-env-vars="SECOPS_PROJECT_ID=${PROJECT_ID},SECOPS_CUSTOMER_ID=YOUR_CUSTOMER_ID,SECOPS_REGION=us" --quiet
 
-# 6. Test
+# Test
 SERVICE_URL=$(gcloud run services describe google-native-mcp --region us-central1 --format="value(status.url)")
 curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" ${SERVICE_URL}/health
 ```
-
-Done. Your autonomous SOC server is live. 🔥
