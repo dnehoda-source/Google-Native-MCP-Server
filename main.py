@@ -155,6 +155,7 @@ AWS_SECRET_ACCESS_KEY = os.getenv("SOAR_AWS_SECRET", "")
 CS_CLIENT_ID = os.getenv("CROWDSTRIKE_CLIENT_ID", "")
 CS_CLIENT_SECRET = os.getenv("CROWDSTRIKE_CLIENT_SECRET", "")
 CS_BASE_URL = os.getenv("CROWDSTRIKE_BASE_URL", "https://api.crowdstrike.com")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 SECOPS_BASE_URL = (
     f"https://{SECOPS_REGION}-chronicle.googleapis.com/v1alpha"
@@ -961,7 +962,7 @@ def search_security_events(text: str, hours_back: int = 24, max_events: int = 10
         gemini_url = (
             f"https://us-central1-aiplatform.googleapis.com/v1/"
             f"projects/{SECOPS_PROJECT_ID}/locations/us-central1/"
-            f"publishers/google/models/gemini-2.5-flash:generateContent"
+            f"publishers/google/models/{GEMINI_MODEL}:generateContent"
         )
         translate_prompt = (
             "You are a Google SecOps UDM query expert. Convert the following natural language "
@@ -2392,7 +2393,7 @@ async def api_chat(request: StarletteRequest):
         gemini_url = (
             f"https://us-central1-aiplatform.googleapis.com/v1/"
             f"projects/{SECOPS_PROJECT_ID}/locations/us-central1/"
-            f"publishers/google/models/gemini-2.5-flash:generateContent"
+            f"publishers/google/models/{GEMINI_MODEL}:generateContent"
         )
         headers_ai = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -2434,18 +2435,27 @@ async def api_chat(request: StarletteRequest):
             except (json.JSONDecodeError, TypeError):
                 result_data = result_text
 
-            # Summarize
+            # Summarize — feed the FULL context back to Gemini as a multi-turn conversation
             try:
                 sum_resp = requests.post(
                     gemini_url, headers={"Authorization": f"Bearer {get_adc_token()}", "Content-Type": "application/json"},
-                    json={"contents": [{"role": "user", "parts": [{"text": (
-                        f"User asked: {user_msg}\nTool {tool_name} returned:\n{result_text[:3000]}\nSummarize concisely."
-                    )}]}]},
+                    json={
+                        "contents": [
+                            {"role": "user", "parts": [{"text": user_msg}]},
+                            {"role": "model", "parts": [{"text": f"I called the {tool_name} tool with arguments {json.dumps(tool_args)}."}]},
+                            {"role": "user", "parts": [{"text": f"Here are the results from {tool_name}:\n\n{result_text[:5000]}\n\nPlease analyze and summarize the key findings. Be specific and actionable."}]},
+                        ],
+                        "systemInstruction": {"parts": [{"text": (
+                            "You are a security analyst summarizing tool results for a SOC operator. "
+                            "Be concise, highlight the most important findings, and recommend next steps. "
+                            "Do NOT ask for more information — you have everything you need in the tool output above."
+                        )}]},
+                    },
                     timeout=30,
                 )
                 summary = sum_resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            except Exception:
-                summary = "Results returned."
+            except Exception as e:
+                summary = f"Tool executed successfully. Raw results attached above. (Summary generation failed: {e})"
 
             return JSONResponse({"tool_called": tool_name, "tool_args": tool_args, "tool_result": result_data, "response": summary})
         else:
