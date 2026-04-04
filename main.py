@@ -2424,7 +2424,10 @@ async def api_chat(request: StarletteRequest):
             tool_args = call.get("args", {})
 
             result = await app_mcp._tool_manager.call_tool(tool_name, tool_args)
-            result_text = result[0].text if result else "No result"
+            if result:
+                result_text = result[0].text if hasattr(result[0], 'text') else str(result[0])
+            else:
+                result_text = "No result"
 
             try:
                 result_data = json.loads(result_text)
