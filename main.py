@@ -257,10 +257,10 @@ def _secops_headers() -> dict:
 
 
 @app_mcp.tool()
-def get_scc_findings(project_id: str, severity: str = "CRITICAL", max_results: int = 10) -> str:
+def get_scc_findings(project_id: str = "", severity: str = "CRITICAL", max_results: int = 10) -> str:
     """Fetch ACTIVE vulnerabilities from Security Command Center."""
     try:
-        project_id = validate_project_id(project_id)
+        project_id = validate_project_id(project_id or SECOPS_PROJECT_ID)
         max_results = min(max(1, max_results), 50)
         client = securitycenter.SecurityCenterClient()
         findings = client.list_findings(request={
@@ -286,10 +286,10 @@ def get_scc_findings(project_id: str, severity: str = "CRITICAL", max_results: i
 
 
 @app_mcp.tool()
-def query_cloud_logging(project_id: str, filter_string: str, max_results: int = 10) -> str:
+def query_cloud_logging(project_id: str = "", filter_string: str = "", max_results: int = 10) -> str:
     """Query Google Cloud Logging for IAM changes, compute events, and audit trails."""
     try:
-        project_id = validate_project_id(project_id)
+        project_id = validate_project_id(project_id or SECOPS_PROJECT_ID)
         if not filter_string or len(filter_string.strip()) < 10:
             return json.dumps({"error": "Filter too broad", "detail": "Minimum 10 chars required."})
         client = cloud_logging.Client(project=project_id)
@@ -774,7 +774,7 @@ def revoke_aws_sts_sessions(target_user: str) -> str:
 
 
 @app_mcp.tool()
-def revoke_gcp_sa_keys(project_id: str, service_account_email: str) -> str:
+def revoke_gcp_sa_keys(project_id: str = "", service_account_email: str = "") -> str:
     """Delete all user-managed keys for a GCP service account. Stops leaked SA key abuse."""
     try:
         token = get_adc_token()
@@ -1444,7 +1444,7 @@ def add_case_comment(case_id: str, comment: str) -> str:
 
 
 @app_mcp.tool()
-def list_log_entries(project_id: str, filter_string: str, order_by: str = "timestamp desc", page_size: int = 20) -> str:
+def list_log_entries(project_id: str = "", filter_string: str = "", order_by: str = "timestamp desc", page_size: int = 20) -> str:
     """Query Cloud Logging entries using Log Query Language (LQL). Supports SIEM audit logs, SOAR playbook errors, IAM changes, and any GCP service logs."""
     try:
         project_id = validate_project_id(project_id)
@@ -1476,7 +1476,7 @@ def list_log_entries(project_id: str, filter_string: str, order_by: str = "times
 
 
 @app_mcp.tool()
-def list_log_names(project_id: str) -> str:
+def list_log_names(project_id: str = "") -> str:
     """List all available log names in a GCP project. Useful for discovering what log sources exist before querying."""
     try:
         project_id = validate_project_id(project_id)
@@ -1498,7 +1498,7 @@ def list_log_names(project_id: str) -> str:
 
 
 @app_mcp.tool()
-def list_log_buckets(project_id: str) -> str:
+def list_log_buckets(project_id: str = "") -> str:
     """List all Cloud Logging storage buckets and their retention policies."""
     try:
         project_id = validate_project_id(project_id)
@@ -1520,7 +1520,7 @@ def list_log_buckets(project_id: str) -> str:
 
 
 @app_mcp.tool()
-def get_log_bucket(project_id: str, bucket_id: str, location: str = "global") -> str:
+def get_log_bucket(bucket_id: str = "_Default", project_id: str = "", location: str = "global") -> str:
     """Get details of a specific Cloud Logging bucket including retention period and lifecycle state."""
     try:
         project_id = validate_project_id(project_id)
@@ -1542,7 +1542,7 @@ def get_log_bucket(project_id: str, bucket_id: str, location: str = "global") ->
 
 
 @app_mcp.tool()
-def list_log_views(project_id: str, bucket_id: str = "_Default", location: str = "global") -> str:
+def list_log_views(bucket_id: str = "_Default", location: str = "global") -> str:
     """List log views within a Cloud Logging bucket. Views control access to subsets of log data."""
     try:
         project_id = validate_project_id(project_id)
@@ -1564,7 +1564,7 @@ def list_log_views(project_id: str, bucket_id: str = "_Default", location: str =
 
 
 @app_mcp.tool()
-def query_secops_audit_logs(project_id: str, hours_back: int = 24, log_type: str = "siem") -> str:
+def query_secops_audit_logs(project_id: str = "", hours_back: int = 24, log_type: str = "siem") -> str:
     """Query SecOps SIEM or SOAR audit logs from Cloud Logging. Finds rule errors, playbook failures, feed issues, and user activity."""
     try:
         project_id = validate_project_id(project_id)
@@ -1611,7 +1611,7 @@ def query_secops_audit_logs(project_id: str, hours_back: int = 24, log_type: str
 
 
 @app_mcp.tool()
-def list_data_access_labels() -> str:
+def list_data_access_labels(project_id: str = "") -> str:
     """List all data access labels (RBAC) configured in SecOps. Shows who can access what data."""
     try:
         v1_base = (
@@ -1632,7 +1632,7 @@ def list_data_access_labels() -> str:
 
 
 @app_mcp.tool()
-def list_data_access_scopes() -> str:
+def list_data_access_scopes(project_id: str = "") -> str:
     """List all data access scopes (RBAC) in SecOps. Shows permission boundaries for users and roles."""
     try:
         v1_base = (
@@ -1658,7 +1658,7 @@ def list_data_access_scopes() -> str:
 
 
 @app_mcp.tool()
-def list_parsers() -> str:
+def list_parsers(project_id: str = "") -> str:
     """List all configured parsers and log types in SecOps. Shows which log sources have active parsers."""
     try:
         v1_base = (
@@ -1679,7 +1679,7 @@ def list_parsers() -> str:
 
 
 @app_mcp.tool()
-def validate_parser(log_type: str, raw_log_sample: str) -> str:
+def validate_parser(log_type: str = "", raw_log_sample: str = "", project_id: str = "") -> str:
     """Validate a parser against a raw log sample. Tests if a log will parse correctly before deployment."""
     try:
         if not log_type:
@@ -1710,7 +1710,7 @@ def validate_parser(log_type: str, raw_log_sample: str) -> str:
 
 
 @app_mcp.tool()
-def list_feeds() -> str:
+def list_feeds(project_id: str = "") -> str:
     """List all configured data feeds in SecOps. Shows feed status, type, and last poll time."""
     try:
         v1_base = (
@@ -1731,7 +1731,7 @@ def list_feeds() -> str:
 
 
 @app_mcp.tool()
-def get_feed(feed_id: str) -> str:
+def get_feed(feed_id: str, project_id: str = "") -> str:
     """Get details of a specific feed including its configuration, status, and last ingestion time."""
     try:
         if not feed_id:
