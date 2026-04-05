@@ -308,23 +308,37 @@ def query_cloud_logging(project_id: str = "", filter_string: str = "", max_resul
 
 
 @app_mcp.tool()
-def search_secops_udm(query: str, hours_back: int = 24) -> str:
-    """Execute a UDM search or YARA-L query in Google SecOps (Chronicle)."""
+def search_secops_udm(query: str, hours_back: int = 24, max_events: int = 100) -> str:
+    """Execute a UDM search query in Google SecOps (Chronicle). Uses the v1alpha udmSearch API."""
     try:
         if not query or len(query.strip()) < 5:
             return json.dumps({"error": "Query too short"})
         hours_back = min(max(1, hours_back), 8760)
+        max_events = min(max(1, max_events), 10000)
         now = datetime.now(timezone.utc)
         start = (now - timedelta(hours=hours_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
         end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        resp = requests.post(
-            f"{SECOPS_BASE_URL}/dashboardQueries:execute",
+        resp = requests.get(
+            f"{SECOPS_BASE_URL}:udmSearch",
             headers=_secops_headers(),
-            json={"dashboardQuery": {"yaraLQuery": query, "timeRange": {"startTime": start, "endTime": end}}},
+            params={
+                "query": query,
+                "time_range.start_time": start,
+                "time_range.end_time": end,
+                "limit": max_events,
+            },
             timeout=60,
         )
         if resp.status_code == 200:
-            return resp.text
+            data = resp.json()
+            events = data.get("events", [])
+            return json.dumps({
+                "events": events[:max_events],
+                "total_events": len(events),
+                "more_data_available": data.get("moreDataAvailable", False),
+                "query": query,
+                "time_range": {"start": start, "end": end},
+            })
         return json.dumps({"error": f"SecOps API [{resp.status_code}]", "detail": resp.text[:500]})
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -2364,15 +2378,15 @@ def autonomous_investigate(
                 start = (now - timedelta(hours=72)).strftime("%Y-%m-%dT%H:%M:%SZ")
                 end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
                 
-                search_resp = requests.post(
-                    f"{SECOPS_BASE_URL}/dashboardQueries:execute",
+                search_resp = requests.get(
+                    f"{SECOPS_BASE_URL}:udmSearch",
                     headers=_secops_headers(),
-                    json={"dashboardQuery": {"yaraLQuery": udm_query, "timeRange": {"startTime": start, "endTime": end}}},
+                    params={"query": udm_query, "time_range.start_time": start, "time_range.end_time": end, "limit": 100},
                     timeout=60,
                 )
                 if search_resp.status_code == 200:
                     search_results = search_resp.json()
-                    step2["events_found"] = len(search_results.get("events", search_results.get("rows", [])))
+                    step2["events_found"] = len(search_results.get("events", []))
                 else:
                     search_results = {"error": f"Search returned {search_resp.status_code}"}
                     step2["events_found"] = 0
