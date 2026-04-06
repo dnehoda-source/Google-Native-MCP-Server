@@ -534,8 +534,7 @@ def check_ingestion_health(log_type: str = "", hours_back: int = 1) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
-# DISABLED: Requires GTI/VirusTotal configuration
-# @app_mcp.tool()
+@app_mcp.tool()
 def enrich_indicator(indicator: str, indicator_type: str = "auto") -> str:
     """Enrich an IP, domain, URL, or file hash using Google Threat Intel / VirusTotal."""
     try:
@@ -1370,8 +1369,7 @@ def get_ip_report(ip_address: str) -> str:
         return json.dumps({"error": str(e)})
 
 
-# DISABLED: Requires GTI subscription
-# @app_mcp.tool()
+@app_mcp.tool()
 def search_threat_actors(query: str, limit: int = 10) -> str:
     """Search for threat actor profiles in VirusTotal/GTI intelligence. Returns matching threat actor names, descriptions, and associated indicators."""
     try:
@@ -1407,8 +1405,7 @@ def search_threat_actors(query: str, limit: int = 10) -> str:
         return json.dumps({"error": str(e)})
 
 
-# DISABLED: Requires GTI subscription
-# @app_mcp.tool()
+@app_mcp.tool()
 def search_malware_families(query: str, limit: int = 10) -> str:
     """Search for malware family profiles in VirusTotal/GTI intelligence. Returns matching family names, descriptions, and classification."""
     try:
