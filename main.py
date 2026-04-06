@@ -1433,8 +1433,9 @@ def get_finding_remediation(project_id: str = "", finding_id: str = "") -> str:
 def list_cases() -> str:
     """List all SOAR cases from Google SecOps. Returns case IDs, titles, priorities, and statuses."""
     try:
+        base_url = f"https://{SECOPS_REGION}-chronicle.googleapis.com/v1beta/projects/{SECOPS_PROJECT_ID}/locations/{SECOPS_REGION}/instances/{SECOPS_CUSTOMER_ID}"
         resp = requests.get(
-            f"{SECOPS_BASE_URL}/cases",
+            f"{base_url}/cases",
             headers=_secops_headers(),
             timeout=30,
         )
