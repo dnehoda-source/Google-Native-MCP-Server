@@ -3290,8 +3290,8 @@ async def api_tools(request: StarletteRequest):
 
 async def api_chat(request: StarletteRequest):
     """
-    Chat endpoint: takes natural language, uses Gemini to pick a tool,
-    calls it, and returns the result with a summary.
+    Chat endpoint: takes natural language, uses Gemini with native tool_calls
+    to pick a tool, calls it, and returns the result with a summary.
     """
     try:
         body = await request.json()
@@ -3299,9 +3299,28 @@ async def api_chat(request: StarletteRequest):
         if not user_msg:
             return JSONResponse({"error": "No message provided"}, status_code=400)
 
-        tools_desc = "\n".join(
-            [f"- {t.name}: {t.description}" for t in app_mcp._tool_manager.list_tools()]
-        )
+        # Build functionDeclarations from all registered tools
+        all_tools = app_mcp._tool_manager.list_tools()
+        tool_declarations = []
+        for tool in all_tools:
+            # Parse tool input schema if available
+            properties = {}
+            required = []
+            if hasattr(tool, 'inputSchema'):
+                schema = tool.inputSchema
+                if isinstance(schema, dict):
+                    properties = schema.get('properties', {})
+                    required = schema.get('required', [])
+            
+            tool_declarations.append({
+                "name": tool.name,
+                "description": tool.description or "No description",
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required
+                }
+            })
 
         token = get_adc_token()
         gemini_url = (
@@ -3311,17 +3330,19 @@ async def api_chat(request: StarletteRequest):
         )
         headers_ai = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
+        # Call Gemini with native functionDeclarations
         gemini_resp = requests.post(
-            gemini_url, headers=headers_ai,
+            gemini_url,
+            headers=headers_ai,
             json={
                 "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+                "tools": [{"functionDeclarations": tool_declarations}],
                 "systemInstruction": {"parts": [{"text": (
-                    "You are a security analyst. Available tools:\n"
-                    f"{tools_desc}\n\n"
-                    "If the user needs a tool, respond with ONLY valid JSON:\n"
-                    '{"tool": "tool_name", "args": {"param": "value"}}\n\n'
-                    "If no tool is needed, answer directly.\n"
-                    f"Default project_id is {SECOPS_PROJECT_ID} unless specified."
+                    "You are a security analyst. You have access to tools that can help investigate security events. "
+                    "If the user's request requires a tool, call the appropriate tool with the right parameters. "
+                    "If no tool is needed, answer directly. "
+                    f"Default project_id is {SECOPS_PROJECT_ID} unless specified. "
+                    "Always provide clear reasoning for your actions."
                 )}]},
             },
             timeout=30,
@@ -3329,51 +3350,95 @@ async def api_chat(request: StarletteRequest):
         if gemini_resp.status_code != 200:
             return JSONResponse({"error": f"Gemini [{gemini_resp.status_code}]: {gemini_resp.text[:300]}"})
 
-        ai_text = gemini_resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        response_data = gemini_resp.json()
+        candidates = response_data.get("candidates", [])
+        if not candidates:
+            return JSONResponse({"error": "No response from Gemini"})
 
-        if "{" in ai_text and '"tool"' in ai_text:
-            start = ai_text.index("{")
-            end = ai_text.rindex("}") + 1
-            call = json.loads(ai_text[start:end])
-            tool_name = call["tool"]
-            tool_args = call.get("args", {})
-
-            result = await app_mcp._tool_manager.call_tool(tool_name, tool_args)
-            if result:
-                result_text = result[0].text if hasattr(result[0], 'text') else str(result[0])
-            else:
-                result_text = "No result"
-
-            try:
-                result_data = json.loads(result_text)
-            except (json.JSONDecodeError, TypeError):
-                result_data = result_text
-
-            # Summarize — feed the FULL context back to Gemini as a multi-turn conversation
-            try:
-                sum_resp = requests.post(
-                    gemini_url, headers={"Authorization": f"Bearer {get_adc_token()}", "Content-Type": "application/json"},
-                    json={
-                        "contents": [
-                            {"role": "user", "parts": [{"text": user_msg}]},
-                            {"role": "model", "parts": [{"text": f"I called the {tool_name} tool with arguments {json.dumps(tool_args)}."}]},
-                            {"role": "user", "parts": [{"text": f"Here are the results from {tool_name}:\n\n{result_text[:5000]}\n\nPlease analyze and summarize the key findings. Be specific and actionable."}]},
-                        ],
-                        "systemInstruction": {"parts": [{"text": (
-                            "You are a security analyst summarizing tool results for a SOC operator. "
-                            "Be concise, highlight the most important findings, and recommend next steps. "
-                            "Do NOT ask for more information — you have everything you need in the tool output above."
-                        )}]},
-                    },
-                    timeout=30,
-                )
-                summary = sum_resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            except Exception as e:
-                summary = f"Tool executed successfully. Raw results attached above. (Summary generation failed: {e})"
-
-            return JSONResponse({"tool_called": tool_name, "tool_args": tool_args, "tool_result": result_data, "response": summary})
-        else:
-            return JSONResponse({"response": ai_text})
+        content = candidates[0].get("content", {})
+        parts = content.get("parts", [])
+        
+        # Check if Gemini made a tool call
+        tool_called = None
+        tool_args = None
+        tool_result_data = None
+        summary = None
+        
+        for part in parts:
+            if "functionCall" in part:
+                # Gemini called a tool
+                tool_called = part["functionCall"]["name"]
+                tool_args = part["functionCall"].get("args", {})
+                
+                # Execute the tool
+                try:
+                    result = await app_mcp._tool_manager.call_tool(tool_called, tool_args)
+                    if result:
+                        # Handle ToolResult objects
+                        if hasattr(result[0], 'text') and result[0].text:
+                            result_text = result[0].text
+                        elif hasattr(result[0], 'content'):
+                            result_text = result[0].content
+                        else:
+                            result_text = str(result[0])
+                    else:
+                        result_text = "No result"
+                    
+                    # Try to parse as JSON, fall back to string
+                    try:
+                        tool_result_data = json.loads(result_text)
+                    except (json.JSONDecodeError, TypeError):
+                        # If it's just a single character, something went wrong
+                        if len(result_text) <= 2:
+                            tool_result_data = {"error": f"Tool returned truncated result: {result_text}"}
+                        else:
+                            tool_result_data = result_text
+                    
+                    # Generate summary with multi-turn conversation
+                    try:
+                        sum_resp = requests.post(
+                            gemini_url,
+                            headers={"Authorization": f"Bearer {get_adc_token()}", "Content-Type": "application/json"},
+                            json={
+                                "contents": [
+                                    {"role": "user", "parts": [{"text": user_msg}]},
+                                    {"role": "model", "parts": [{"text": f"I will call the {tool_called} tool with arguments {json.dumps(tool_args)}."}]},
+                                    {"role": "user", "parts": [{"text": f"Here are the results from {tool_called}:\n\n{result_text[:5000]}\n\nPlease analyze and summarize the key findings. Be specific and actionable."}]},
+                                ],
+                                "systemInstruction": {"parts": [{"text": (
+                                    "You are a security analyst summarizing tool results for a SOC operator. "
+                                    "Be concise, highlight the most important findings, and recommend next steps. "
+                                    "Do NOT ask for more information — you have everything you need in the tool output above."
+                                )}]},
+                            },
+                            timeout=30,
+                        )
+                        summary = sum_resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                    except Exception as e:
+                        logger.error(f"Summary generation failed: {e}")
+                        summary = f"Tool {tool_called} executed successfully. (Summary generation failed: {e})"
+                    
+                    return JSONResponse({
+                        "tool_called": tool_called,
+                        "tool_args": tool_args,
+                        "tool_result": tool_result_data,
+                        "response": summary
+                    })
+                except Exception as e:
+                    logger.error(f"Tool execution error: {e}")
+                    return JSONResponse({
+                        "tool_called": tool_called,
+                        "tool_args": tool_args,
+                        "error": f"Tool execution failed: {str(e)}",
+                        "response": f"Failed to execute tool {tool_called}: {str(e)}"
+                    }, status_code=500)
+            
+            elif "text" in part:
+                # Gemini responded with text (no tool call)
+                return JSONResponse({"response": part["text"]})
+        
+        # If we get here, no tool call and no text (shouldn't happen)
+        return JSONResponse({"error": "Unexpected response format from Gemini"})
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
