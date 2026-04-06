@@ -1091,6 +1091,11 @@ def search_security_events(text: str = "", query: str = "", hours_back: int = 24
 
         udm_query = gemini_resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         udm_query = udm_query.strip("`").strip()
+        
+        # Clean up the query: remove ORDER BY and LIMIT clauses (they're API params, not UDM syntax)
+        import re
+        udm_query_clean = re.sub(r'\s+(order\s+by|limit)\s+.*$', '', udm_query, flags=re.IGNORECASE)
+        udm_query_clean = udm_query_clean.strip()
 
         # Step 2: Execute the UDM search
         now = datetime.now(timezone.utc)
@@ -1100,7 +1105,7 @@ def search_security_events(text: str = "", query: str = "", hours_back: int = 24
             f"{SECOPS_BASE_URL}:udmSearch",
             headers=_secops_headers(),
             params={
-                "query": udm_query,
+                "query": udm_query_clean,
                 "time_range.start_time": start,
                 "time_range.end_time": end,
                 "limit": max_events,
@@ -1110,8 +1115,8 @@ def search_security_events(text: str = "", query: str = "", hours_back: int = 24
         if resp.status_code == 200:
             data = resp.json()
             events = data.get("events", data.get("results", []))[:max_events]
-            return json.dumps({"natural_language_query": search_text, "udm_query": udm_query, "events": events, "count": len(events)})
-        return json.dumps({"error": f"SecOps search failed [{resp.status_code}]", "udm_query": udm_query, "detail": resp.text[:500]})
+            return json.dumps({"natural_language_query": search_text, "udm_query": udm_query_clean, "events": events, "count": len(events)})
+        return json.dumps({"error": f"SecOps search failed [{resp.status_code}]", "udm_query": udm_query_clean, "detail": resp.text[:500]})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
