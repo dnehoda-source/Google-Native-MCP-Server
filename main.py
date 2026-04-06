@@ -535,26 +535,30 @@ def check_ingestion_health(log_type: str = "", hours_back: int = 1) -> str:
 
 
 @app_mcp.tool()
-def enrich_indicator(indicator: str, indicator_type: str = "auto") -> str:
+def enrich_indicator(indicator: str = "", value: str = "", indicator_type: str = "auto") -> str:
     """Enrich an IP, domain, URL, or file hash using Google Threat Intel / VirusTotal."""
     try:
-        indicator = validate_indicator(indicator)
+        # Accept both 'indicator' and 'value' parameters
+        final_indicator = indicator or value
+        if not final_indicator:
+            return json.dumps({"error": "indicator or value parameter required"})
+        final_indicator = validate_indicator(final_indicator)
         if not GTI_API_KEY:
             return json.dumps({"error": "GTI_API_KEY not configured"})
 
         if indicator_type == "auto":
-            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", indicator):
+            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", final_indicator):
                 indicator_type = "ip"
-            elif re.match(r"^[a-fA-F0-9]{32}$", indicator) or re.match(r"^[a-fA-F0-9]{64}$", indicator):
+            elif re.match(r"^[a-fA-F0-9]{32}$", final_indicator) or re.match(r"^[a-fA-F0-9]{64}$", final_indicator):
                 indicator_type = "hash"
-            elif "/" in indicator or "http" in indicator.lower():
+            elif "/" in final_indicator or "http" in final_indicator.lower():
                 indicator_type = "url"
             else:
                 indicator_type = "domain"
 
         vt = "https://www.virustotal.com/api/v3"
-        urls = {"ip": f"{vt}/ip_addresses/{indicator}", "domain": f"{vt}/domains/{indicator}",
-                "hash": f"{vt}/files/{indicator}", "url": f"{vt}/search?query={indicator}"}
+        urls = {"ip": f"{vt}/ip_addresses/{final_indicator}", "domain": f"{vt}/domains/{final_indicator}",
+                "hash": f"{vt}/files/{final_indicator}", "url": f"{vt}/search?query={final_indicator}"}
         resp = requests.get(urls.get(indicator_type, urls["url"]),
                             headers={"x-apikey": GTI_API_KEY}, timeout=30)
 
