@@ -59,6 +59,9 @@ TOOL CATEGORIES:
     - search_threat_actors      → Threat actor intelligence search
     - search_malware_families   → Malware family intelligence search
 
+  📋 DETECTION RULE GENERATION
+    - create_detection_rule_for_scc_finding → Auto-generate YARA-L rules from SCC findings
+
   🛡️ SCC VULNERABILITY & REMEDIATION
     - top_vulnerability_findings → Vulns sorted by Attack Exposure Score
     - get_finding_remediation   → Remediation guidance for a finding
@@ -3044,3 +3047,129 @@ app = Starlette(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
+
+
+@app_mcp.tool()
+def create_detection_rule_for_scc_finding(finding_category: str, resource: str = "", severity: str = "HIGH") -> str:
+    """Create a YARA-L detection rule based on an SCC finding category.
+    
+    Examples:
+    - "Privilege Escalation: Impersonation Role Granted" → rule detecting service account impersonation
+    - "User-managed keys to service account" → rule detecting key creation events
+    - "Persistence: IAM Anomalous Grant" → rule detecting unusual IAM grants
+    """
+    try:
+        # Generate rule name from category
+        rule_name = finding_category.replace(" ", "_").replace(":", "").replace("-", "_")[:60]
+        rule_name = f"SCC_{rule_name}_{datetime.now(timezone.utc).strftime('%s')[-6:]}"
+        
+        # Build YARA-L rule based on category
+        rule_text = ""
+        
+        if "impersonation" in finding_category.lower() or "service account token" in finding_category.lower():
+            rule_text = f'''rule {rule_name} {{
+  meta:
+    author = "MCP SCC Detection"
+    description = "Detects: {finding_category}"
+    severity = "{severity}"
+    created = "{datetime.now(timezone.utc).isoformat()}"
+  events:
+    $e.metadata.event_type = "GOOGLE_CLOUD_AUDIT_LOG"
+    $e.metadata.log_type = "ADMIN_ACTIVITY"
+    $e.target.user.account_type = "SERVICE_ACCOUNT"
+    (
+      $e.metadata.api_name = "iam.googleapis.com"
+      AND (
+        $e.metadata.api_method = "SetIamPolicy"
+        OR $e.metadata.api_method = "AddBinding"
+        OR $e.metadata.api_method = "CreateServiceAccountKey"
+      )
+    )
+  match:
+    $e
+'''
+        
+        elif "user-managed key" in finding_category.lower() or "key created" in finding_category.lower():
+            rule_text = f'''rule {rule_name} {{
+  meta:
+    author = "MCP SCC Detection"
+    description = "Detects: {finding_category}"
+    severity = "{severity}"
+    created = "{datetime.now(timezone.utc).isoformat()}"
+  events:
+    $e.metadata.event_type = "GOOGLE_CLOUD_AUDIT_LOG"
+    $e.metadata.log_type = "ADMIN_ACTIVITY"
+    $e.metadata.api_name = "iam.googleapis.com"
+    $e.metadata.api_method = "CreateServiceAccountKey"
+    $e.target.resource_type = "service_account"
+  match:
+    $e
+'''
+        
+        elif "anomalous grant" in finding_category.lower() or "iam" in finding_category.lower():
+            rule_text = f'''rule {rule_name} {{
+  meta:
+    author = "MCP SCC Detection"
+    description = "Detects: {finding_category}"
+    severity = "{severity}"
+    created = "{datetime.now(timezone.utc).isoformat()}"
+  events:
+    $e.metadata.event_type = "GOOGLE_CLOUD_AUDIT_LOG"
+    $e.metadata.log_type = "ADMIN_ACTIVITY"
+    $e.metadata.api_name = "iam.googleapis.com"
+    (
+      $e.metadata.api_method = "SetIamPolicy"
+      OR $e.metadata.api_method = "UpdateIamPolicy"
+      OR $e.metadata.api_method = "AddBinding"
+    )
+  match:
+    $e where count($e) >= 1
+'''
+        
+        else:
+            # Generic rule for unknown findings
+            rule_text = f'''rule {rule_name} {{
+  meta:
+    author = "MCP SCC Detection"
+    description = "Detects: {finding_category}"
+    severity = "{severity}"
+    created = "{datetime.now(timezone.utc).isoformat()}"
+  events:
+    $e.metadata.event_type = "GOOGLE_CLOUD_AUDIT_LOG"
+    $e.metadata.log_type = "ADMIN_ACTIVITY"
+  match:
+    $e
+'''
+        
+        # Deploy the rule via SecOps API
+        rule_deploy = requests.post(
+            f"https://{SECOPS_REGION}-chronicle.googleapis.com/v1/projects/{SECOPS_PROJECT_ID}/locations/{SECOPS_REGION}/instances/{SECOPS_CUSTOMER_ID}/rules",
+            headers=_secops_headers(),
+            json={
+                "text": rule_text,
+                "enabled": True,
+            },
+            timeout=30,
+        )
+        
+        if rule_deploy.status_code in (200, 201):
+            result = rule_deploy.json()
+            logger.info(f"Created detection rule: {rule_name}")
+            return json.dumps({
+                "rule_name": rule_name,
+                "status": "created",
+                "rule_text": rule_text,
+                "api_response": result,
+            })
+        else:
+            logger.warning(f"Rule creation returned {rule_deploy.status_code}")
+            return json.dumps({
+                "rule_name": rule_name,
+                "status": "creation_failed",
+                "rule_text": rule_text,
+                "error": rule_deploy.text[:500],
+                "note": "Rule generated but API deployment failed. Paste the rule_text into SecOps UI manually.",
+            })
+    
+    except Exception as e:
+        return json.dumps({"error": str(e)})
