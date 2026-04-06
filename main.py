@@ -1077,7 +1077,7 @@ def search_security_events(text: str = "", query: str = "", hours_back: int = 24
             "You are a Google SecOps UDM query expert. Convert the following natural language "
             "security search into a valid UDM Search query. Return ONLY the raw UDM query string, "
             "nothing else. No markdown, no explanation.\n\n"
-            f"Natural language: {text}\n\nUDM Query:"
+            f"Natural language: {search_text}\n\nUDM Query:"
         )
         gemini_resp = requests.post(
             gemini_url,
