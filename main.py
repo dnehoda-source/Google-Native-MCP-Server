@@ -403,7 +403,7 @@ def get_scc_findings(project_id: str = "", severity: str = "CRITICAL", max_resul
 
 @app_mcp.tool()
 def query_cloud_logging(project_id: str = "", filter_string: str = "", query: str = "", max_results: int = 10, hours_back: int = 24, start_time: str = "", end_time: str = "") -> str:
-    """Query Google Cloud Logging for IAM changes, compute events, and audit trails with time range filtering."""
+    """[GCP NATIVE - NOT SECOPS] Query Cloud Logging for IAM, compute, audit trails. Use: severity=ERROR, logName:cloudaudit, resource.type=gce_instance."""
     try:
         project_id = validate_project_id(project_id or SECOPS_PROJECT_ID)
         # Accept both 'filter_string' and 'query' parameters
@@ -429,7 +429,7 @@ def query_cloud_logging(project_id: str = "", filter_string: str = "", query: st
 
 @app_mcp.tool()
 def search_secops_udm(query: str = "", udm_query: str = "", hours_back: int = 24, max_events: int = 100, start_time: str = "", end_time: str = "") -> str:
-    """Execute a UDM search query in Google SecOps (Chronicle). Uses the v1alpha udmSearch API with time range filtering."""
+    """[SECOPS CHRONICLE] Direct UDM queries. Advanced threat hunting with Chronicle metadata: event_type, severity, action, source IP, target user, etc."""}]}
     try:
         final_query = query or udm_query
         if not final_query or len(final_query.strip()) < 5:
@@ -1104,7 +1104,7 @@ def update_soar_case(
 
 @app_mcp.tool()
 def search_security_events(text: str = "", query: str = "", hours_back: int = 24, max_events: int = 100) -> str:
-    """Search security events using natural language. Translates text to a UDM query via Gemini, then executes the search in SecOps."""
+    """[SECOPS CHRONICLE] Search UDM for logins, malware, threats. Translates natural language to UDM: metadata.event_type=USER_LOGIN, security_result.action=ALLOW, etc."""
     try:
         search_text = text or query
         if not search_text or len(search_text.strip()) < 3:
