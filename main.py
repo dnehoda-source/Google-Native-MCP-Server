@@ -428,7 +428,7 @@ def query_cloud_logging(project_id: str = "", filter_string: str = "", query: st
 
 
 @app_mcp.tool()
-def search_secops_udm(query: str = "", udm_query: str = "", hours_back: int = 24, max_events: int = 100, start_time: str = "", end_time: str = "") -> str:
+def udm_search(query: str = "", udm_query: str = "", hours_back: int = 24, max_events: int = 100, start_time: str = "", end_time: str = "") -> str:
     """[SECOPS CHRONICLE] Direct UDM queries. Advanced threat hunting with Chronicle metadata: event_type, severity, action, source IP, target user, etc."""
     try:
         final_query = query or udm_query
@@ -2268,7 +2268,7 @@ def create_containment_playbook(
                 "trigger_filter": "rule_name STARTS_WITH 'Auto_IOC_IP_'",
                 "steps": [
                     {"action": "enrich_indicator", "description": "Enrich IP via VirusTotal/GTI"},
-                    {"action": "search_secops_udm", "description": "Search for all events involving this IP"},
+                    {"action": "udm_search", "description": "Search for all events involving this IP"},
                     {"action": "update_data_table", "description": "Add IP to automated_blocklist Data Table"},
                     {"action": "isolate_crowdstrike_host", "description": "Isolate affected endpoints (requires approval)", "requires_approval": True},
                     {"action": "add_case_comment", "description": "Document investigation findings"},
@@ -2287,7 +2287,7 @@ def create_containment_playbook(
                 "steps": [
                     {"action": "enrich_indicator", "description": "Enrich domain via GTI"},
                     {"action": "get_domain_report", "description": "Get full domain reputation report"},
-                    {"action": "search_secops_udm", "description": "Find users who accessed this domain"},
+                    {"action": "udm_search", "description": "Find users who accessed this domain"},
                     {"action": "update_data_table", "description": "Add domain to blocklist Data Table"},
                     {"action": "suspend_okta_user", "description": "Suspend affected users (requires approval)", "requires_approval": True},
                     {"action": "add_case_comment", "description": "Document findings and actions"},
@@ -2304,7 +2304,7 @@ def create_containment_playbook(
                 "trigger_filter": "rule_name STARTS_WITH 'Auto_IOC_Hash_'",
                 "steps": [
                     {"action": "get_file_report", "description": "Full VirusTotal file analysis"},
-                    {"action": "search_secops_udm", "description": "Find all hosts that executed this file"},
+                    {"action": "udm_search", "description": "Find all hosts that executed this file"},
                     {"action": "isolate_crowdstrike_host", "description": "Isolate infected endpoints (requires approval)", "requires_approval": True},
                     {"action": "update_data_table", "description": "Add hash to blocklist Data Table"},
                     {"action": "add_case_comment", "description": "Document findings"},
@@ -2324,7 +2324,7 @@ def create_containment_playbook(
                 "steps": [
                     {"action": "enrich_indicator", "description": "Enrich phishing URLs via GTI"},
                     {"action": "purge_email_o365", "description": "Hard Delete email from all inboxes"},
-                    {"action": "search_secops_udm", "description": "Check if anyone clicked the link"},
+                    {"action": "udm_search", "description": "Check if anyone clicked the link"},
                     {"action": "suspend_okta_user", "description": "Suspend users who clicked (requires approval)", "requires_approval": True},
                     {"action": "revoke_azure_ad_sessions", "description": "Revoke Azure AD sessions for clickers"},
                     {"action": "add_case_comment", "description": "Full forensic documentation"},
