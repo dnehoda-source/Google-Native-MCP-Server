@@ -318,8 +318,10 @@ def create_case(
 # ════════════════════════════════════════════════════════════════
 
 @server.call_tool()
-def get_last_logins(count: int = 5) -> str:
+def get_last_logins(count: int = 5, N: int = 0) -> str:
     """Get the last N user login events."""
+    # Handle both 'count' and 'N' parameter names
+    count = count if count != 5 else (N if N > 0 else 5)
     try:
         chronicle = get_chronicle_client()
         events = chronicle.query_events(
@@ -338,8 +340,9 @@ def get_last_logins(count: int = 5) -> str:
 
 
 @server.call_tool()
-def get_last_cases(count: int = 5) -> str:
+def get_last_cases(count: int = 5, N: int = 0) -> str:
     """Get the last N SOAR cases."""
+    count = count if count != 5 else (N if N > 0 else 5)
     try:
         chronicle = get_chronicle_client()
         cases = chronicle.list_cases(page_size=count)
@@ -355,8 +358,9 @@ def get_last_cases(count: int = 5) -> str:
 
 
 @server.call_tool()
-def get_last_detections(count: int = 5) -> str:
+def get_last_detections(count: int = 5, N: int = 0) -> str:
     """Get the last N detection alerts."""
+    count = count if count != 5 else (N if N > 0 else 5)
     try:
         chronicle = get_chronicle_client()
         detections = chronicle.list_detections(page_size=count)
