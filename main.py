@@ -724,11 +724,15 @@ def update_data_table(table_name: str, rows: list, description: str = "") -> str
 
 
 @app_mcp.tool()
-def list_rules(page_size: int = 100) -> str:
+def list_rules(page_size: int = 100, limit: int = 0, max_results: int = 0, count: int = 0) -> str:
     """List all YARA-L rules in the SecOps instance with their enabled/disabled status."""
     try:
+        # Accept any count/limit/max_results parameter
+        final_page_size = limit or max_results or count or page_size
+        final_page_size = min(max(1, final_page_size), 1000)
+        
         resp = requests.get(f"{SECOPS_BASE_URL}/rules",
-                            headers=_secops_headers(), params={"pageSize": page_size}, timeout=15)
+                            headers=_secops_headers(), params={"pageSize": final_page_size}, timeout=15)
         if resp.status_code == 200:
             return resp.text
         return json.dumps({"error": f"API [{resp.status_code}]"})
@@ -1195,12 +1199,12 @@ def search_security_events(text: str = "", query: str = "", hours_back: int = 24
 
 
 @app_mcp.tool()
-def get_security_alerts(hours_back: int = 24, max_alerts: int = 10, limit: int = 0) -> str:
+def get_security_alerts(hours_back: int = 24, max_alerts: int = 10, limit: int = 0, count: int = 0, max_results: int = 0) -> str:
     """Retrieve recent security alerts from Google SecOps with time filtering."""
     try:
         hours_back = min(max(1, hours_back), 8760)
-        # Accept both 'max_alerts' and 'limit' parameters
-        alert_limit = limit if limit > 0 else max_alerts
+        # Accept any count/limit/max_results/max_alerts parameter
+        alert_limit = count or max_results or limit or max_alerts
         alert_limit = min(max(1, alert_limit), 1000)
         now = datetime.now(timezone.utc)
         start = (now - timedelta(hours=hours_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -3348,6 +3352,56 @@ from starlette.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 import pathlib
 
+# Parameter normalization mapping
+# Maps common parameter name variations to expected function parameter names
+PARAMETER_ALIASES = {
+    # Count/limit/results aliases
+    "count": ["max_findings", "max_results", "limit", "max_events"],
+    "limit": ["max_findings", "max_results", "count", "max_events"],
+    "max_results": ["count", "limit", "max_findings", "max_events"],
+    "max_events": ["count", "limit", "max_results", "max_findings"],
+    "max_findings": ["count", "limit", "max_results"],
+    
+    # Query/filter/text aliases
+    "query": ["text", "filter", "udm_query", "filter_string"],
+    "text": ["query", "filter", "udm_query", "filter_string"],
+    "filter": ["query", "text", "udm_query", "filter_string"],
+    "filter_string": ["query", "text", "filter", "udm_query"],
+    "udm_query": ["query", "text", "filter", "filter_string"],
+    
+    # Indicator/value aliases
+    "value": ["indicator", "ip", "domain"],
+    "indicator": ["value", "ip", "domain"],
+    "ip": ["value", "indicator", "domain"],
+    "domain": ["value", "indicator", "ip"],
+    
+    # Time range aliases
+    "time_range": ["timerange", "hours_back"],
+    "timerange": ["time_range", "hours_back"],
+    "hours_back": ["time_range", "timerange"],
+}
+
+def normalize_tool_parameters(tool_name: str, args: dict) -> dict:
+    """Normalize tool parameters to handle parameter name variations from Gemini."""
+    if not args:
+        return args
+    
+    normalized = args.copy()
+    
+    # For each parameter provided, check if we need to rename it
+    for param_name in list(args.keys()):
+        if param_name not in args:
+            continue
+            
+        # Get aliases for this parameter
+        aliases = PARAMETER_ALIASES.get(param_name, [])
+        
+        # Try to find a better name for this parameter by checking what the tool expects
+        # For now, just keep it as-is since we're adding flexible signatures
+        # Future: could inspect the tool function signature here
+    
+    return normalized
+
 # Create SSE transport with security disabled for Cloud Run compatibility
 # Cloud Run's load balancer forwards requests with different Host headers
 # which triggers the default DNS rebinding protection
@@ -3469,8 +3523,12 @@ async def api_chat(request: StarletteRequest):
                     if not tool:
                         raise ValueError(f"Tool {tool_called} not found")
                     
+                    # Normalize parameters before calling tool
+                    # Maps common parameter name variations
+                    normalized_args = normalize_tool_parameters(tool_called, tool_args)
+                    
                     # Call the tool function directly with the arguments
-                    result_text = tool.fn(**tool_args)
+                    result_text = tool.fn(**normalized_args)
                     
                     # Ensure result_text is a string
                     if not isinstance(result_text, str):
