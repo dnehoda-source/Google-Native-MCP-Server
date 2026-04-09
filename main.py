@@ -103,7 +103,7 @@ logger = logging.getLogger("google-native-mcp")
 # MCP SERVER
 # ═══════════════════════════════════════════════════════════════
 
-TOOL_COUNT = 24
+TOOL_COUNT = 25
 app_mcp = FastMCP("google-native-mcp", json_response=True)
 
 # ═══════════════════════════════════════════════════════════════
@@ -258,35 +258,79 @@ def search_secops_udm(
 
 
 @app_mcp.tool()
-def list_secops_alerts(
-    hours_back: int = 24,
-    start_time: str = "",
-    end_time: str = "",
-    max_alerts: int = 500,
-    snapshot_query: str = 'feedback_summary.status != "CLOSED"',
+def list_secops_detections(
+    max_results: int = 10,
+    status_filter: str = "",
+    priority_filter: str = "",
 ) -> str:
     """
-    List recent YARA-L alerts from Google SecOps.
-    Uses the official SecOps SDK get_alerts method for accurate results.
+    List recent detections/cases from Google SecOps — these are what appear in the
+    SecOps UI as 'Detections' or 'Cases'. Returns the most recent cases with rule
+    names, alert counts, priority, and stage.
 
     Args:
-        hours_back:     Look-back window (default 24h)
-        start_time:     ISO 8601 UTC string (overrides hours_back if both given)
-        end_time:       ISO 8601 UTC string (overrides hours_back if both given)
-        max_alerts:     Max alerts to return (default 500)
-        snapshot_query: Alert filter (default: open alerts only)
+        max_results:     Number of cases to return (default 10, max 200)
+        status_filter:   Optional filter string (e.g., 'status = "OPEN"')
+        priority_filter: Optional priority filter (e.g., 'priority = "HIGH"')
     """
     try:
-        start_dt, end_dt = _time_window(hours_back, start_time, end_time)
         chron = get_chronicle()
-        result = chron.get_alerts(
-            start_time=start_dt,
-            end_time=end_dt,
-            snapshot_query=snapshot_query,
-            max_alerts=min(max_alerts, 10000),
+        filter_parts = []
+        if status_filter:
+            filter_parts.append(status_filter)
+        if priority_filter:
+            filter_parts.append(priority_filter)
+        filter_query = " AND ".join(filter_parts) if filter_parts else None
+        cases = chron.list_cases(
+            page_size=min(max_results, 200),
+            filter_query=filter_query,
+            order_by="updateTime desc",
+            as_list=True,
         )
-        logger.info(f"Alerts: {result.get('total', 0)} returned")
-        return json.dumps(result)
+        # Summarize for readability
+        summary = []
+        for c in cases:
+            summary.append({
+                "case_id": c.get("name", "").split("/")[-1],
+                "name": c.get("displayName", ""),
+                "stage": c.get("stage", ""),
+                "priority": c.get("priority", ""),
+                "alert_count": c.get("alertCount", 0),
+                "assignee": c.get("assignee", {}).get("displayName", "unassigned"),
+                "update_time": c.get("updateTime", ""),
+                "create_time": c.get("createTime", ""),
+            })
+        logger.info(f"Detections/Cases: {len(summary)} returned")
+        return json.dumps({"detections": summary, "count": len(summary)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@app_mcp.tool()
+def list_secops_investigations(max_results: int = 10) -> str:
+    """
+    List recent SecOps investigations with AI-generated summaries, verdicts,
+    and findings. These are the enriched investigation views in the Chronicle UI.
+
+    Args:
+        max_results: Number of investigations to return (default 10)
+    """
+    try:
+        chron = get_chronicle()
+        result = chron.list_investigations(page_size=min(max_results, 100))
+        investigations = result.get("investigations", [])
+        summary = []
+        for inv in investigations:
+            summary.append({
+                "id": inv.get("name", "").split("/")[-1],
+                "name": inv.get("displayName", ""),
+                "verdict": inv.get("verdict", ""),
+                "summary": (inv.get("summary", "") or "")[:500],
+                "create_time": inv.get("createTime", ""),
+                "update_time": inv.get("updateTime", ""),
+            })
+        logger.info(f"Investigations: {len(summary)} returned")
+        return json.dumps({"investigations": summary, "count": len(summary)})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -364,10 +408,17 @@ def extract_iocs_from_alerts(hours_back: int = 24) -> str:
     try:
         start_dt, end_dt = _time_window(min(max(1, hours_back), 168))
         chron = get_chronicle()
-        data = chron.get_alerts(start_time=start_dt, end_time=end_dt, max_alerts=5000)
+        # Pull events from UDM for IOC extraction
+        data = chron.search_udm(
+            query="metadata.event_type != \"GENERIC_EVENT\"",
+            start_time=start_dt,
+            end_time=end_dt,
+            max_events=5000,
+        )
         ips, domains, hashes, emails = set(), set(), set(), set()
-        for alert in data.get("alerts", []):
-            for event in alert.get("events", []):
+        for alert in data.get("events", []):
+            event = alert.get("udm", alert)
+            for event in [event]:
                 for field in ("target", "principal", "src", "intermediary"):
                     entity = event.get(field, {})
                     for ip in entity.get("ip", []):
