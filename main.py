@@ -3389,14 +3389,115 @@ def secops_list_cases(limit: int = 100) -> str:
 
 @app_mcp.tool()
 def secops_get_case(case_id: str) -> str:
-    """Get detailed information about a specific SOAR case."""
+    """
+    Get full detailed information about a SOAR case including rule text,
+    detection details, affected entities (hosts, users, IPs), MITRE mappings,
+    and process command lines. Combines case metadata + rule detections.
+
+    Args:
+        case_id: Case number (e.g., "5012")
+    """
     try:
         if not case_id:
             return json.dumps({"error": "case_id is required"})
         client = SecOpsClient()
-        chronicle = client.chronicle(customer_id=SECOPS_CUSTOMER_ID, project_id=SECOPS_PROJECT_ID, region=SECOPS_REGION)
-        result = chronicle.get_case(case_id)
-        return json.dumps(result if isinstance(result, dict) else {"case": str(result)})
+        chronicle = client.chronicle(
+            customer_id=SECOPS_CUSTOMER_ID,
+            project_id=SECOPS_PROJECT_ID,
+            region=SECOPS_REGION,
+        )
+
+        # 1. Get case metadata from list_cases
+        case_name = f"projects/{SECOPS_PROJECT_ID}/locations/{SECOPS_REGION}/instances/{SECOPS_CUSTOMER_ID}/cases/{case_id}"
+        cases = chronicle.list_cases(page_size=200, as_list=True)
+        case_data = None
+        for c in cases:
+            if c.get('name', '').endswith(f'/cases/{case_id}'):
+                case_data = c
+                break
+        if not case_data:
+            return json.dumps({"error": f"Case {case_id} not found"})
+
+        rule_name = case_data.get('displayName', '')
+
+        # 2. Find the matching detection rule and get detections
+        rules = chronicle.list_rules(page_size=200, as_list=True)
+        matched_rule = None
+        for r in rules:
+            if r.get('displayName', '') == rule_name:
+                matched_rule = r
+                break
+
+        detections = []
+        hosts = set()
+        users = set()
+        ips = set()
+        processes = set()
+        hashes = set()
+        mitre = {}
+
+        if matched_rule:
+            rid = matched_rule.get('name', '').split('/')[-1]
+            end_dt = datetime.now(timezone.utc)
+            start_dt = end_dt - timedelta(days=30)
+            try:
+                dets = chronicle.list_detections(
+                    rule_id=rid, start_time=start_dt, end_time=end_dt,
+                    page_size=20, as_list=True,
+                )
+                for d in dets:
+                    for det in d.get('detection', [d]):
+                        for f in det.get('detectionFields', []):
+                            if f.get('key') == 'hostname':
+                                hosts.add(f['value'])
+                        for label in det.get('ruleLabels', []):
+                            if 'mitre' in label.get('key', '').lower():
+                                mitre[label['key']] = label['value']
+                        for outcome in det.get('outcomes', []):
+                            k, v = outcome.get('key', ''), outcome.get('value', '')
+                            if 'hostname' in k:
+                                hosts.update(h.strip() for h in v.split(',') if h.strip())
+                            elif 'command_line' in k:
+                                processes.update(p.strip() for p in v.split(',') if p.strip())
+                            elif 'sha256' in k:
+                                hashes.update(h.strip() for h in v.split(',') if h.strip())
+                            elif 'user' in k:
+                                users.update(u.strip() for u in v.split(',') if u.strip())
+                detections = dets
+            except Exception:
+                pass
+
+        report = {
+            "case_id": case_id,
+            "name": case_data.get('displayName', ''),
+            "priority": case_data.get('priority', '').replace('PRIORITY_', ''),
+            "status": case_data.get('status', ''),
+            "stage": case_data.get('stage', ''),
+            "alert_count": case_data.get('alertCount', 0),
+            "assignee": case_data.get('assignee', 'unassigned'),
+            "workflow_status": case_data.get('workflowStatus', ''),
+            "create_time": case_data.get('createTime', ''),
+            "update_time": case_data.get('updateTime', ''),
+            "entities": {
+                "hosts": sorted(hosts),
+                "users": sorted(users),
+                "ips": sorted(ips),
+                "file_hashes": sorted(hashes),
+                "processes": sorted(processes),
+            },
+            "mitre_attack": mitre,
+            "rule": {
+                "name": matched_rule.get('displayName', '') if matched_rule else '',
+                "text": (matched_rule.get('text', '') if matched_rule else '')[:1000],
+                "severity": matched_rule.get('severity', {}).get('displayName', '') if matched_rule and isinstance(matched_rule.get('severity'), dict) else '',
+            },
+            "detection_count": len(detections),
+            "detection_time_range": {
+                "earliest": min((d.get('detectionTime', d.get('createTime', '')) for d in detections), default=''),
+                "latest": max((d.get('detectionTime', d.get('createTime', '')) for d in detections), default=''),
+            } if detections else {},
+        }
+        return json.dumps(report)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -3424,21 +3525,68 @@ def secops_update_case(case_id: str, priority: str = "", status: str = "", comme
 
 
 @app_mcp.tool()
-def secops_list_case_alerts(case_id: str, limit: int = 50) -> str:
-    """List all alerts associated with a specific SOAR case."""
+def secops_list_case_alerts(case_id: str, days_back: int = 30) -> str:
+    """
+    List all detection alerts associated with a SOAR case by matching the case's
+    rule name to actual rule detections.
+
+    Args:
+        case_id:   Case number (e.g., "5012")
+        days_back: How far back to search for detections (default 30)
+    """
     try:
         if not case_id:
             return json.dumps({"error": "case_id is required"})
-        limit = min(max(1, limit), 500)
-        end_dt = datetime.now(timezone.utc)
-        start_dt = end_dt - timedelta(hours=168)  # 7 days
         client = SecOpsClient()
-        chronicle = client.chronicle(customer_id=SECOPS_CUSTOMER_ID, project_id=SECOPS_PROJECT_ID, region=SECOPS_REGION)
-        result = chronicle.get_alerts(start_time=start_dt, end_time=end_dt, max_alerts=limit)
-        alerts = result.get('alerts', result.get('data', [])) if isinstance(result, dict) else result
-        # Filter by case_id if possible
-        case_alerts = [a for a in alerts if str(a.get('caseId', a.get('case_id', ''))) == str(case_id)]
-        return json.dumps({"case_id": case_id, "count": len(case_alerts), "alerts": case_alerts})
+        chronicle = client.chronicle(
+            customer_id=SECOPS_CUSTOMER_ID,
+            project_id=SECOPS_PROJECT_ID,
+            region=SECOPS_REGION,
+        )
+        # Find the case to get its rule name
+        cases = chronicle.list_cases(page_size=200, as_list=True)
+        case_data = None
+        for c in cases:
+            if c.get('name', '').endswith(f'/cases/{case_id}'):
+                case_data = c
+                break
+        if not case_data:
+            return json.dumps({"error": f"Case {case_id} not found"})
+
+        rule_name = case_data.get('displayName', '')
+
+        # Find matching rule
+        rules = chronicle.list_rules(page_size=200, as_list=True)
+        matched_rule = None
+        for r in rules:
+            if r.get('displayName', '') == rule_name:
+                matched_rule = r
+                break
+        if not matched_rule:
+            return json.dumps({"case_id": case_id, "rule": rule_name, "alerts": [], "note": "No matching custom rule found — may be a curated rule"})
+
+        rid = matched_rule.get('name', '').split('/')[-1]
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=min(days_back, 90))
+        dets = chronicle.list_detections(
+            rule_id=rid, start_time=start_dt, end_time=end_dt,
+            page_size=50, as_list=True,
+        )
+        # Summarize detections
+        alerts = []
+        for d in dets:
+            for det in d.get('detection', [d]):
+                alert = {
+                    "rule": det.get('ruleName', ''),
+                    "severity": det.get('severity', ''),
+                    "alert_state": det.get('alertState', ''),
+                    "detection_time": d.get('detectionTime', ''),
+                    "url": det.get('urlBackToProduct', ''),
+                    "fields": {f['key']: f['value'] for f in det.get('detectionFields', [])},
+                    "outcomes": {o['key']: o['value'] for o in det.get('outcomes', [])},
+                }
+                alerts.append(alert)
+        return json.dumps({"case_id": case_id, "rule": rule_name, "count": len(alerts), "alerts": alerts})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
