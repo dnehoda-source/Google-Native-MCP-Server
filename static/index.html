@@ -154,8 +154,8 @@ async function sendMessage() {
         html += '<span class="tool-tag">🔧 ' + data.tool_called + '</span><br><br>';
       }
       // Main response
-      const response = data.response || data.summary || JSON.stringify(data.tool_result, null, 2);
-      html += response.replace(/\n/g, '<br>');
+      const response = data.response || data.summary || (data.tool_result ? JSON.stringify(data.tool_result, null, 2) : 'No response received.');
+      html += (response || '').replace(/\n/g, '<br>');
       // Turn info
       if (data.turns_used) {
         html += '<div class="turn-info">' + (data.tools_called?.length || 1) + ' tool calls across ' + data.turns_used + ' turns</div>';
