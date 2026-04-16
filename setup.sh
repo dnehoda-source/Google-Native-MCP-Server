@@ -1,19 +1,23 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
-# MCP Boss — One-Click Setup Script
+# MCP Boss — Setup Script
 # ═══════════════════════════════════════════════════════════════
 #
 # Usage:
-#   chmod +x setup.sh && ./setup.sh
-#
-# Or from Cloud Shell:
+#   # Interactive (clone first):
 #   git clone https://github.com/dnehoda-source/MCP-Boss.git
-#   cd MCP-Boss && chmod +x setup.sh && ./setup.sh
+#   cd MCP-Boss && ./setup.sh
 #
-# Prerequisites:
-#   - gcloud CLI authenticated (gcloud auth login)
-#   - GCP project with billing enabled
-#   - Chronicle/SecOps instance with customer ID
+#   # One-liner with arguments:
+#   curl -sL https://raw.githubusercontent.com/dnehoda-source/MCP-Boss/main/setup.sh | bash -s -- \
+#     --project your-project-id \
+#     --customer your-secops-customer-id \
+#     --gti-key your-vt-api-key
+#
+#   # Minimal (GTI key optional):
+#   curl -sL https://raw.githubusercontent.com/dnehoda-source/MCP-Boss/main/setup.sh | bash -s -- \
+#     --project my-project --customer abc123def456
+#
 # ═══════════════════════════════════════════════════════════════
 
 set -e
@@ -24,43 +28,64 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# ── Parse arguments ──
+PROJECT_ID=""
+CUSTOMER_ID=""
+REGION="us"
+GTI_KEY=""
+SERVICE_NAME="mcp-boss"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --project)     PROJECT_ID="$2"; shift 2 ;;
+        --customer)    CUSTOMER_ID="$2"; shift 2 ;;
+        --region)      REGION="$2"; shift 2 ;;
+        --gti-key)     GTI_KEY="$2"; shift 2 ;;
+        --service)     SERVICE_NAME="$2"; shift 2 ;;
+        -h|--help)
+            echo "Usage: ./setup.sh --project PROJECT_ID --customer SECOPS_CUSTOMER_ID [--region us] [--gti-key KEY] [--service mcp-boss]"
+            exit 0 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════════════════╗"
-echo "║          🛡️  MCP Boss — Setup Wizard            ║"
+echo "║          🛡️  MCP Boss — Setup                   ║"
 echo "║     Autonomous Security Operations Server       ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# ── Step 1: Get configuration ──
-echo -e "${YELLOW}Step 1: Configuration${NC}"
-echo ""
-
-# Project ID
-DEFAULT_PROJECT=$(gcloud config get-value project 2>/dev/null)
-read -p "GCP Project ID [$DEFAULT_PROJECT]: " PROJECT_ID
-PROJECT_ID=${PROJECT_ID:-$DEFAULT_PROJECT}
+# ── Fill in missing values interactively (only works if not piped) ──
 if [ -z "$PROJECT_ID" ]; then
-    echo -e "${RED}Error: Project ID is required.${NC}"
+    DEFAULT_PROJECT=$(gcloud config get-value project 2>/dev/null || true)
+    if [ -t 0 ]; then
+        read -p "GCP Project ID [$DEFAULT_PROJECT]: " PROJECT_ID
+        PROJECT_ID=${PROJECT_ID:-$DEFAULT_PROJECT}
+    else
+        PROJECT_ID=$DEFAULT_PROJECT
+    fi
+fi
+
+if [ -z "$PROJECT_ID" ]; then
+    echo -e "${RED}Error: Project ID is required. Use --project YOUR_PROJECT_ID${NC}"
     exit 1
 fi
 
-# SecOps Customer ID
-read -p "SecOps Customer ID (from Chronicle settings): " CUSTOMER_ID
 if [ -z "$CUSTOMER_ID" ]; then
-    echo -e "${RED}Error: SecOps Customer ID is required.${NC}"
+    if [ -t 0 ]; then
+        read -p "SecOps Customer ID: " CUSTOMER_ID
+    fi
+fi
+
+if [ -z "$CUSTOMER_ID" ]; then
+    echo -e "${RED}Error: SecOps Customer ID is required. Use --customer YOUR_CUSTOMER_ID${NC}"
     exit 1
 fi
 
-# Region
-read -p "SecOps Region [us]: " REGION
-REGION=${REGION:-us}
-
-# GTI API Key
-read -p "GTI/VirusTotal API Key (optional, press Enter to skip): " GTI_KEY
-
-# Service name
-read -p "Cloud Run service name [mcp-boss]: " SERVICE_NAME
-SERVICE_NAME=${SERVICE_NAME:-mcp-boss}
+if [ -z "$GTI_KEY" ] && [ -t 0 ]; then
+    read -p "GTI/VirusTotal API Key (optional, Enter to skip): " GTI_KEY
+fi
 
 echo ""
 echo -e "${CYAN}Configuration:${NC}"
@@ -70,16 +95,28 @@ echo "  Region:      $REGION"
 echo "  GTI Key:     ${GTI_KEY:+configured}${GTI_KEY:-not set}"
 echo "  Service:     $SERVICE_NAME"
 echo ""
-read -p "Continue? (y/n) " -n 1 -r
-echo ""
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Aborted."
-    exit 0
+
+if [ -t 0 ]; then
+    read -p "Continue? (y/n) " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborted."
+        exit 0
+    fi
 fi
 
-# ── Step 2: Enable APIs ──
+# ── Clone repo if not already in it ──
+if [ ! -f "main.py" ] && [ ! -f "Dockerfile" ]; then
+    echo -e "${YELLOW}Cloning MCP Boss...${NC}"
+    TMPDIR=$(mktemp -d)
+    git clone --depth 1 https://github.com/dnehoda-source/MCP-Boss.git "$TMPDIR/MCP-Boss" 2>/dev/null
+    cd "$TMPDIR/MCP-Boss"
+    echo -e "${GREEN}✅ Cloned${NC}"
+fi
+
+# ── Step 1: Enable APIs ──
 echo ""
-echo -e "${YELLOW}Step 2: Enabling required APIs...${NC}"
+echo -e "${YELLOW}Step 1: Enabling required APIs...${NC}"
 gcloud services enable \
     run.googleapis.com \
     cloudbuild.googleapis.com \
@@ -94,18 +131,16 @@ gcloud services enable \
     --project=$PROJECT_ID --quiet
 echo -e "${GREEN}✅ APIs enabled${NC}"
 
-# ── Step 3: Create service account + IAM roles ──
+# ── Step 2: Create service account + IAM roles ──
 echo ""
-echo -e "${YELLOW}Step 3: Setting up service account & IAM roles...${NC}"
+echo -e "${YELLOW}Step 2: Setting up service account & IAM roles...${NC}"
 SA_NAME="mcp-boss"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-# Create SA (ignore if exists)
 gcloud iam service-accounts create $SA_NAME \
     --display-name="MCP Boss Service Account" \
     --project=$PROJECT_ID 2>/dev/null || true
 
-# Grant required roles
 ROLES=(
     "roles/chronicle.admin"
     "roles/securitycenter.findingsViewer"
@@ -125,20 +160,20 @@ for ROLE in "${ROLES[@]}"; do
         --condition=None \
         --quiet 2>/dev/null || true
 done
-echo -e "${GREEN}✅ Service account configured: $SA_EMAIL${NC}"
+echo -e "${GREEN}✅ Service account: $SA_EMAIL${NC}"
 
-# ── Step 4: Build container ──
+# ── Step 3: Build container ──
 echo ""
-echo -e "${YELLOW}Step 4: Building container image...${NC}"
+echo -e "${YELLOW}Step 3: Building container...${NC}"
 gcloud builds submit \
     --project=$PROJECT_ID \
     --tag gcr.io/$PROJECT_ID/mcp-boss:latest \
     --suppress-logs
 echo -e "${GREEN}✅ Container built${NC}"
 
-# ── Step 5: Deploy to Cloud Run ──
+# ── Step 4: Deploy to Cloud Run ──
 echo ""
-echo -e "${YELLOW}Step 5: Deploying to Cloud Run...${NC}"
+echo -e "${YELLOW}Step 4: Deploying to Cloud Run...${NC}"
 
 ENV_VARS="SECOPS_PROJECT_ID=$PROJECT_ID,SECOPS_CUSTOMER_ID=$CUSTOMER_ID,SECOPS_REGION=$REGION"
 if [ -n "$GTI_KEY" ]; then
@@ -157,38 +192,28 @@ gcloud run deploy $SERVICE_NAME \
     --timeout=300 \
     --quiet
 
-# Get the service URL
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
     --project=$PROJECT_ID \
     --region=us-central1 \
     --format="value(status.url)")
 
-# ── Step 6: Verify ──
+# ── Step 5: Verify ──
 echo ""
-echo -e "${YELLOW}Step 6: Verifying deployment...${NC}"
+echo -e "${YELLOW}Step 5: Verifying...${NC}"
 sleep 5
 HEALTH=$(curl -s "$SERVICE_URL/health" 2>/dev/null)
 TOOLS=$(echo $HEALTH | python3 -c "import sys,json; print(json.load(sys.stdin).get('tools',0))" 2>/dev/null || echo "?")
-STATUS=$(echo $HEALTH | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unknown")
 
 echo ""
-echo -e "${CYAN}"
-echo "╔══════════════════════════════════════════════════╗"
-echo "║          🛡️  MCP Boss — Deployed!               ║"
-echo "╠══════════════════════════════════════════════════╣"
-echo -e "║  Status:  ${GREEN}$STATUS${CYAN}                              ║"
-echo -e "║  Tools:   ${GREEN}$TOOLS${CYAN}                                    ║"
-echo "╠══════════════════════════════════════════════════╣"
-echo -e "║  ${NC}Web UI:   ${GREEN}$SERVICE_URL${CYAN}  ║"
-echo -e "║  ${NC}Health:   ${GREEN}$SERVICE_URL/health${CYAN}  ║"
-echo -e "║  ${NC}MCP:      ${GREEN}$SERVICE_URL/mcp${CYAN}  ║"
-echo -e "║  ${NC}SSE:      ${GREEN}$SERVICE_URL/sse${CYAN}  ║"
-echo "╚══════════════════════════════════════════════════╝"
+echo -e "${GREEN}"
+echo "══════════════════════════════════════════════════"
+echo "  🛡️  MCP Boss — Deployed!  ($TOOLS tools)"
+echo "══════════════════════════════════════════════════"
+echo ""
+echo "  Web UI:     $SERVICE_URL"
+echo "  Health:     $SERVICE_URL/health"
+echo "  MCP:        $SERVICE_URL/mcp"
+echo "  SSE:        $SERVICE_URL/sse"
+echo ""
+echo "  Gemini CLI: gemini --tool-endpoint $SERVICE_URL/mcp"
 echo -e "${NC}"
-echo ""
-echo "Connect Gemini CLI:"
-echo "  gemini --tool-endpoint $SERVICE_URL/mcp"
-echo ""
-echo "Connect Claude Desktop (claude_desktop_config.json):"
-echo "  {\"mcpServers\":{\"mcp-boss\":{\"url\":\"$SERVICE_URL/sse\"}}}"
-echo ""
