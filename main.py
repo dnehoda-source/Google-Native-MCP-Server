@@ -3886,25 +3886,93 @@ PARAMETER_ALIASES = {
 }
 
 def normalize_tool_parameters(tool_name: str, args: dict) -> dict:
-    """Normalize tool parameters to handle parameter name variations from Gemini."""
+    """Normalize tool parameters to handle parameter name variations from Gemini.
+    Gemini often invents parameter names that don't match the function signature.
+    This maps them to what the tool actually expects."""
     if not args:
         return args
-    
-    normalized = args.copy()
-    
-    # For each parameter provided, check if we need to rename it
-    for param_name in list(args.keys()):
-        if param_name not in args:
-            continue
-            
-        # Get aliases for this parameter
-        aliases = PARAMETER_ALIASES.get(param_name, [])
-        
-        # Try to find a better name for this parameter by checking what the tool expects
-        # For now, just keep it as-is since we're adding flexible signatures
-        # Future: could inspect the tool function signature here
-    
-    return normalized
+
+    # Get the actual tool function's parameter names
+    tool_obj = app_mcp._tool_manager._tools.get(tool_name)
+    if not tool_obj:
+        return args
+
+    import inspect
+    try:
+        sig = inspect.signature(tool_obj.fn)
+        expected_params = set(sig.parameters.keys())
+    except (ValueError, TypeError):
+        return args
+
+    # If all args already match, return as-is
+    if set(args.keys()).issubset(expected_params):
+        return args
+
+    # Common Gemini parameter name mismatches
+    PARAM_MAP = {
+        # Azure AD
+        "user_principal_name": "user_email",
+        "user_principal": "user_email",
+        "upn": "user_email",
+        "email": "user_email",
+        "username": "user_email",
+        # Okta
+        "user_id": "user_email",
+        "user": "user_email",
+        # AWS
+        "user_name": "target_user",
+        "iam_user": "target_user",
+        # CrowdStrike
+        "host": "hostname",
+        "host_name": "hostname",
+        # General
+        "query_string": "query",
+        "search_query": "query",
+        "filter": "filter_string",
+        "filter_query": "filter_string",
+        "max": "max_results",
+        "limit": "max_results",
+        "hours": "hours_back",
+        "days": "days_back",
+        "lookback_hours": "hours_back",
+        "lookback_days": "days_back",
+        "project": "project_id",
+        "case": "case_id",
+        "rule": "rule_id",
+        "indicator_value": "indicator",
+        "ioc": "indicator",
+        "ip_address": "indicator",
+        "domain_name": "indicator",
+        "file_hash": "indicator",
+        "sha256": "indicator",
+        "ip": "indicator",
+        "domain": "indicator",
+        "hash": "indicator",
+        "table": "table_name",
+        "playbook_name": "name",
+        "rule_name": "rule_text",
+        "member_email": "member",
+        "sa_email": "service_account_email",
+    }
+
+    normalized = {}
+    for k, v in args.items():
+        if k in expected_params:
+            normalized[k] = v
+        elif k in PARAM_MAP and PARAM_MAP[k] in expected_params:
+            normalized[PARAM_MAP[k]] = v
+        else:
+            # Try fuzzy: if only one expected param is unset, map to it
+            normalized[k] = v
+
+    # Remove any keys that aren't in the function signature
+    final = {k: v for k, v in normalized.items() if k in expected_params}
+
+    # If we lost required params, fall back to original
+    if not final and args:
+        return args
+
+    return final
 
 # Create SSE transport with security disabled for Cloud Run compatibility
 # Cloud Run's load balancer forwards requests with different Host headers
