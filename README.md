@@ -17,7 +17,7 @@ curl -sL https://raw.githubusercontent.com/dnehoda-source/MCP-Boss/main/setup.sh
 ```
 
 ### Or open in Cloud Shell:
-[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/dnehoda-source/MCP-Boss&cloudshell_tutorial=setup.sh&cloudshell_open_in_editor=README.md)
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/dnehoda-source/MCP-Boss.git&shellonly=true&cloudshell_workspace=MCP-Boss)
 
 ### Or step by step:
 ```bash
