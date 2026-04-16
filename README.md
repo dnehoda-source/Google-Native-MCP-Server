@@ -8,11 +8,15 @@
 
 [![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/dnehoda-source/MCP-Boss&cloudshell_tutorial=setup.sh&cloudshell_open_in_editor=README.md)
 
-Or manually:
+Or from any terminal:
+```bash
+curl -sL https://raw.githubusercontent.com/dnehoda-source/MCP-Boss/main/setup.sh | bash
+```
+
+Or clone first:
 ```bash
 git clone https://github.com/dnehoda-source/MCP-Boss.git
-cd MCP-Boss
-chmod +x setup.sh && ./setup.sh
+cd MCP-Boss && ./setup.sh
 ```
 
 The setup wizard will:
