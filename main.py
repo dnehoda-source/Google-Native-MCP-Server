@@ -3946,6 +3946,148 @@ async def api_chat(request: StarletteRequest):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # ═══════════════════════════════════════════════════════════════
+# 🔐 IAM & PROJECT MANAGEMENT
+# ═══════════════════════════════════════════════════════════════
+
+
+@app_mcp.tool()
+def get_iam_policy(project_id: str = "") -> str:
+    """
+    Get the IAM policy for the GCP project — lists all members and their roles.
+    Shows who has access, what roles they have, and any conditions applied.
+
+    Args:
+        project_id: GCP project ID (defaults to configured project)
+    """
+    try:
+        pid = project_id or SECOPS_PROJECT_ID
+        token = get_adc_token()
+        resp = requests.post(
+            f"https://cloudresourcemanager.googleapis.com/v1/projects/{pid}:getIamPolicy",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"options": {"requestedPolicyVersion": 3}},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return json.dumps({"error": f"API [{resp.status_code}]", "detail": resp.text[:500]})
+        policy = resp.json()
+        # Summarize bindings
+        summary = []
+        for binding in policy.get("bindings", []):
+            role = binding.get("role", "")
+            members = binding.get("members", [])
+            condition = binding.get("condition", {})
+            entry = {"role": role, "members": members, "member_count": len(members)}
+            if condition:
+                entry["condition"] = condition.get("title", condition.get("expression", ""))
+            summary.append(entry)
+        summary.sort(key=lambda x: x["role"])
+        return json.dumps({
+            "project": pid,
+            "total_bindings": len(summary),
+            "total_unique_roles": len(set(b["role"] for b in summary)),
+            "bindings": summary,
+        })
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@app_mcp.tool()
+def get_service_accounts(project_id: str = "") -> str:
+    """
+    List all service accounts in the GCP project with their status and key counts.
+
+    Args:
+        project_id: GCP project ID (defaults to configured project)
+    """
+    try:
+        pid = project_id or SECOPS_PROJECT_ID
+        token = get_adc_token()
+        resp = requests.get(
+            f"https://iam.googleapis.com/v1/projects/{pid}/serviceAccounts",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return json.dumps({"error": f"API [{resp.status_code}]", "detail": resp.text[:500]})
+        accounts = resp.json().get("accounts", [])
+        summary = []
+        for sa in accounts:
+            email = sa.get("email", "")
+            # Get key count for each SA
+            key_count = 0
+            try:
+                keys_resp = requests.get(
+                    f"https://iam.googleapis.com/v1/projects/{pid}/serviceAccounts/{email}/keys",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"keyTypes": "USER_MANAGED"},
+                    timeout=10,
+                )
+                if keys_resp.status_code == 200:
+                    key_count = len(keys_resp.json().get("keys", []))
+            except Exception:
+                pass
+            summary.append({
+                "email": email,
+                "display_name": sa.get("displayName", ""),
+                "disabled": sa.get("disabled", False),
+                "user_managed_keys": key_count,
+            })
+        return json.dumps({"project": pid, "service_accounts": summary, "count": len(summary)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@app_mcp.tool()
+def check_iam_permissions(project_id: str = "", member: str = "") -> str:
+    """
+    Check what IAM roles a specific member (user or service account) has on the project.
+    If no member specified, returns all roles for all members.
+
+    Args:
+        project_id: GCP project ID (defaults to configured project)
+        member:     Email of user or service account to check (e.g., user@domain.com)
+    """
+    try:
+        pid = project_id or SECOPS_PROJECT_ID
+        token = get_adc_token()
+        resp = requests.post(
+            f"https://cloudresourcemanager.googleapis.com/v1/projects/{pid}:getIamPolicy",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"options": {"requestedPolicyVersion": 3}},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return json.dumps({"error": f"API [{resp.status_code}]", "detail": resp.text[:500]})
+        policy = resp.json()
+        if member:
+            # Filter to just this member's roles
+            member_roles = []
+            search_terms = [f"user:{member}", f"serviceAccount:{member}", f"group:{member}", member]
+            for binding in policy.get("bindings", []):
+                for m in binding.get("members", []):
+                    if any(term in m for term in search_terms):
+                        member_roles.append({
+                            "role": binding["role"],
+                            "member": m,
+                            "condition": binding.get("condition", {}).get("title", "") if binding.get("condition") else None,
+                        })
+            return json.dumps({"project": pid, "member": member, "roles": member_roles, "role_count": len(member_roles)})
+        else:
+            # Return all members grouped by role
+            member_map = {}
+            for binding in policy.get("bindings", []):
+                for m in binding.get("members", []):
+                    if m not in member_map:
+                        member_map[m] = []
+                    member_map[m].append(binding["role"])
+            result = [{"member": m, "roles": r, "role_count": len(r)} for m, r in sorted(member_map.items())]
+            return json.dumps({"project": pid, "members": result, "total_members": len(result)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════
 # 📊 MTTx METRICS
 # ═══════════════════════════════════════════════════════════════
 
@@ -4102,6 +4244,7 @@ GEMINI_TOOL_ALLOWLIST = {
     "search_secops_udm", "search_security_events", "lookup_entity",
     "enrich_indicator", "get_file_report", "get_domain_report", "get_ip_report",
     "search_threat_actors", "get_mttx_metrics", "get_security_alerts", "query_ingestion_stats",
+    "get_iam_policy", "get_service_accounts", "check_iam_permissions",
     "query_cloud_logging", "list_rules", "create_soar_case",
     "add_case_comment", "close_case", "autonomous_investigate",
     "create_detection_rule_for_scc_finding",
