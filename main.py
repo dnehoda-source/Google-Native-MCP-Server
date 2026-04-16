@@ -2183,41 +2183,89 @@ def get_feed(feed_id: str, project_id: str = "") -> str:
 
 
 @app_mcp.tool()
-def query_ingestion_stats(hours_back: int = 24) -> str:
-    """Query ingestion volume statistics by log source. Shows total events ingested per log type."""
+def query_ingestion_stats(days_back: int = 30) -> str:
+    """
+    Query Chronicle SIEM ingestion bandwidth and record counts from GCP Cloud Monitoring.
+    Returns daily breakdown of ingestion volume (GB) and record counts.
+
+    Args:
+        days_back: Number of days to look back (default 30, max 90)
+    """
     try:
-        hours_back = min(max(1, hours_back), 8760)
+        from google.cloud import monitoring_v3
+        from google.protobuf.duration_pb2 import Duration
+
+        days_back = min(max(1, days_back), 90)
+        client = monitoring_v3.MetricServiceClient()
+        project = f"projects/{SECOPS_PROJECT_ID}"
         now = datetime.now(timezone.utc)
-        start_dt = now - timedelta(hours=hours_back)
-        client = SecOpsClient()
-        chronicle = client.chronicle(
-            customer_id=SECOPS_CUSTOMER_ID,
-            project_id=SECOPS_PROJECT_ID,
-            region=SECOPS_REGION
+        start_dt = now - timedelta(days=days_back)
+        interval = monitoring_v3.TimeInterval(start_time=start_dt, end_time=now)
+        agg = monitoring_v3.Aggregation(
+            alignment_period=Duration(seconds=86400),
+            per_series_aligner=monitoring_v3.Aggregation.Aligner.ALIGN_SUM,
+            cross_series_reducer=monitoring_v3.Aggregation.Reducer.REDUCE_SUM,
+            group_by_fields=[],
         )
-        result = chronicle.search_udm(
-            query='metadata.event_type = "USER_LOGIN" OR metadata.event_type = "NETWORK_CONNECTION" OR metadata.event_type = "PROCESS_LAUNCH" OR metadata.event_type = "FILE_CREATION"',
-            start_time=start_dt,
-            end_time=now,
-            max_events=10000,
-        )
-        events = result.get('events', []) if isinstance(result, dict) else (result if isinstance(result, list) else [])
-        # Aggregate by log type
-        log_types = {}
-        event_types = {}
-        for e in events:
-            if isinstance(e, dict):
-                lt = e.get('metadata', {}).get('log_type', 'UNKNOWN')
-                et = e.get('metadata', {}).get('event_type', 'UNKNOWN')
-                log_types[lt] = log_types.get(lt, 0) + 1
-                event_types[et] = event_types.get(et, 0) + 1
-        sorted_lt = sorted(log_types.items(), key=lambda x: x[1], reverse=True)
-        return json.dumps({
-            "total_events_sampled": len(events),
-            "hours_back": hours_back,
-            "by_log_type": dict(sorted_lt[:20]),
-            "by_event_type": dict(sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:10]),
+
+        # Bytes ingested per day
+        bytes_results = client.list_time_series(request={
+            "name": project,
+            "filter": 'metric.type = "chronicle.googleapis.com/ingestion/log/bytes_count"',
+            "interval": interval,
+            "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
+            "aggregation": agg,
         })
+        daily_bytes = {}
+        for ts in bytes_results:
+            for point in ts.points:
+                date_str = point.interval.start_time.strftime('%Y-%m-%d')
+                val = int(point.value.int64_value or point.value.double_value)
+                daily_bytes[date_str] = daily_bytes.get(date_str, 0) + val
+
+        # Records ingested per day
+        record_results = client.list_time_series(request={
+            "name": project,
+            "filter": 'metric.type = "chronicle.googleapis.com/ingestion/log/record_count"',
+            "interval": interval,
+            "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
+            "aggregation": agg,
+        })
+        daily_records = {}
+        for ts in record_results:
+            for point in ts.points:
+                date_str = point.interval.start_time.strftime('%Y-%m-%d')
+                val = int(point.value.int64_value or point.value.double_value)
+                daily_records[date_str] = daily_records.get(date_str, 0) + val
+
+        all_dates = sorted(set(list(daily_bytes.keys()) + list(daily_records.keys())))
+        daily_breakdown = []
+        total_bytes = 0
+        total_records = 0
+        for date in all_dates:
+            b = daily_bytes.get(date, 0)
+            r = daily_records.get(date, 0)
+            total_bytes += b
+            total_records += r
+            daily_breakdown.append({
+                "date": date,
+                "bytes": b,
+                "gb": round(b / (1024**3), 2),
+                "records": r,
+            })
+
+        num_days = max(len(all_dates), 1)
+        return json.dumps({
+            "days_back": days_back,
+            "total_bytes": total_bytes,
+            "total_gb": round(total_bytes / (1024**3), 2),
+            "total_records": total_records,
+            "avg_daily_gb": round(total_bytes / (1024**3) / num_days, 2),
+            "avg_daily_records": total_records // num_days,
+            "daily_breakdown": daily_breakdown,
+        })
+    except ImportError:
+        return json.dumps({"error": "google-cloud-monitoring not installed. Add it to requirements.txt."})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -4053,7 +4101,7 @@ GEMINI_TOOL_ALLOWLIST = {
     "get_scc_findings", "top_vulnerability_findings", "get_finding_remediation",
     "search_secops_udm", "search_security_events", "lookup_entity",
     "enrich_indicator", "get_file_report", "get_domain_report", "get_ip_report",
-    "search_threat_actors", "get_mttx_metrics", "get_security_alerts",
+    "search_threat_actors", "get_mttx_metrics", "get_security_alerts", "query_ingestion_stats",
     "query_cloud_logging", "list_rules", "create_soar_case",
     "add_case_comment", "close_case", "autonomous_investigate",
     "create_detection_rule_for_scc_finding",
