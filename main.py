@@ -4810,17 +4810,11 @@ def get_last_cases(count: int = 5, n: int = 0, N: int = 0, num_cases: int = 0, l
             project_id=SECOPS_PROJECT_ID,
             region=SECOPS_REGION
         )
-        # Use legacy SOAR endpoint (get_cases) which has the full case history
-        end_dt = datetime.now(timezone.utc)
-        start_dt = end_dt - timedelta(days=90)
-        result = chronicle.get_cases(
-            start_time=start_dt,
-            end_time=end_dt,
-            page_size=max(count, 50)
-        )
-        cases = result.get('cases', result.get('data', [])) if isinstance(result, dict) else result if isinstance(result, list) else []
-        # Sort by createTime descending (newest first)
-        cases.sort(key=lambda c: str(c.get('createTime', c.get('create_time', c.get('caseId', '')))), reverse=True)
+        # Fetch all cases (auto-paginate) and sort by createTime descending
+        result = chronicle.list_cases(as_list=True)
+        cases = result if isinstance(result, list) else []
+        # Sort by createTime descending (newest first) — createTime is millisecond epoch string
+        cases.sort(key=lambda c: int(c.get('createTime', c.get('create_time', '0')) or '0'), reverse=True)
         cases = cases[:count]
         return json.dumps({"count": len(cases), "cases": cases})
     except Exception as e:
