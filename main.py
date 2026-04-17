@@ -4746,6 +4746,120 @@ def get_last_cases(count: int = 5, n: int = 0, N: int = 0, num_cases: int = 0, l
         return json.dumps({"error": str(e)})
 
 @app_mcp.tool()
+def run_retrohunt(rule_id: str, hours_back: float = 24.0, days_back: int = 0, start_time: str = "", end_time: str = "") -> str:
+    """Run a retrohunt on a YARA-L detection rule over a historical time range. Returns operation_id for status polling.
+    
+    Args:
+        rule_id: Rule ID (e.g., 'ru_12345678...')
+        hours_back: Hours to look back from now (default 24)
+        days_back: Days to look back (alternative to hours_back, takes precedence)
+        start_time: ISO 8601 start time (takes precedence over hours_back/days_back)
+        end_time: ISO 8601 end time (default: now)
+    
+    Returns: operation_id for polling with get_retrohunt_status
+    """
+    try:
+        if not rule_id or not rule_id.startswith('ru_'):
+            return json.dumps({"error": "Invalid rule_id format (must start with 'ru_')"})
+        
+        # Parse time range
+        end_dt = datetime.now(timezone.utc)
+        if end_time:
+            try:
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            except:
+                pass
+        
+        if start_time:
+            try:
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            except:
+                if days_back > 0:
+                    start_dt = end_dt - timedelta(days=days_back)
+                else:
+                    hours_back = min(max(0.01, hours_back), 8760)
+                    start_dt = end_dt - timedelta(hours=hours_back)
+        else:
+            if days_back > 0:
+                start_dt = end_dt - timedelta(days=days_back)
+            else:
+                hours_back = min(max(0.01, hours_back), 8760)
+                start_dt = end_dt - timedelta(hours=hours_back)
+        
+        client = SecOpsClient()
+        chronicle = client.chronicle(
+            customer_id=SECOPS_CUSTOMER_ID,
+            project_id=SECOPS_PROJECT_ID,
+            region=SECOPS_REGION
+        )
+        result = chronicle.create_retrohunt(
+            rule_id=rule_id,
+            start_time=start_dt,
+            end_time=end_dt
+        )
+        operation_id = result.get('name', result.get('operation_id', ''))
+        return json.dumps({
+            "status": "started",
+            "rule_id": rule_id,
+            "operation_id": operation_id,
+            "time_range": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
+            "note": "Use get_retrohunt_status with operation_id to poll for results"
+        })
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@app_mcp.tool()
+def get_retrohunt_status(rule_id: str, operation_id: str) -> str:
+    """Get the status and results of a retrohunt operation.
+    
+    Args:
+        rule_id: Rule ID (e.g., 'ru_12345678...')
+        operation_id: Operation ID from run_retrohunt response
+    
+    Returns: Retrohunt status, progress, and results
+    """
+    try:
+        if not rule_id or not operation_id:
+            return json.dumps({"error": "rule_id and operation_id are required"})
+        
+        client = SecOpsClient()
+        chronicle = client.chronicle(
+            customer_id=SECOPS_CUSTOMER_ID,
+            project_id=SECOPS_PROJECT_ID,
+            region=SECOPS_REGION
+        )
+        result = chronicle.get_retrohunt(
+            rule_id=rule_id,
+            operation_id=operation_id
+        )
+        
+        # Extract meaningful fields
+        status_response = {
+            "operation_id": operation_id,
+            "rule_id": rule_id,
+            "state": result.get('done', False) and "COMPLETED" or "RUNNING",
+            "done": result.get('done', False),
+        }
+        
+        if result.get('done'):
+            response = result.get('response', {})
+            status_response["matches"] = response.get('num_matches', 0)
+            status_response["errors"] = response.get('errors', [])
+            if response.get('start_time'):
+                status_response["start_time"] = response.get('start_time')
+            if response.get('end_time'):
+                status_response["end_time"] = response.get('end_time')
+        
+        if result.get('error'):
+            status_response["error"] = result.get('error')
+        
+        return json.dumps(status_response)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@app_mcp.tool()
 def get_last_detections(count: int = 5, n: int = 0, N: int = 0, num_detections: int = 0, limit: int = 0, number_of_detections: int = 0, minutes_back: float = 0.0) -> str:
     """Get the last N detection alerts. Use for: 'last 5 detections', 'last 10 detections'."""
     for val in [n, N, num_detections, limit, number_of_detections]:
