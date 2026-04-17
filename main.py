@@ -567,7 +567,7 @@ def query_cloud_logging(project_id: str = "", filter_string: str = "", query: st
 
 @app_mcp.tool()
 def search_secops_udm(query: str = "", udm_query: str = "", hours_back: float = 24.0, max_events: int = 100, start_time: str = "", end_time: str = "", time_range: str = "", limit: int = 0, count: int = 0, minutes_back: float = 0.0) -> str:
-    """[SECOPS CHRONICLE] Direct UDM queries. Advanced threat hunting with Chronicle metadata: event_type, severity, action, source IP, target user, etc."""
+    """[SECOPS CHRONICLE] Direct raw log/UDM queries. Advanced threat hunting with Chronicle metadata. Use this when asked for 'logs'."""
     try:
         final_query = query or udm_query
         if not final_query or len(final_query.strip()) < 5:
@@ -1326,7 +1326,7 @@ def update_soar_case(
 
 @app_mcp.tool()
 def search_security_events(text: str = "", query: str = "", hours_back: float = 24.0, time_range: str = "", timerange: str = "", max_events: int = 100, minutes_back: float = 0.0) -> str:
-    """[SECOPS CHRONICLE] Search UDM for logins, malware, threats. Translates natural language to UDM: metadata.event_type=USER_LOGIN, security_result.action=ALLOW, etc."""
+    """[SECOPS CHRONICLE] Search raw logs/UDM for logins, malware, threats. Translates natural language to UDM: metadata.event_type=USER_LOGIN, security_result.action=ALLOW, etc. Use this when asked for 'logs'."""
     try:
         search_text = text or query
         if not search_text or len(search_text.strip()) < 3:
