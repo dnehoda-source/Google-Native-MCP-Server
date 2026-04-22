@@ -173,6 +173,7 @@ from policy_and_approvals import tool_previews as _tp
 
 # Auth middleware (Google OIDC ID-token verification + role mapping)
 from auth_middleware import AuthMiddleware, principal_from_request, LOCAL_PRINCIPAL
+from redaction import maybe_redact as _maybe_redact_output
 
 # ═══════════════════════════════════════════════════════════════
 # SESSION MEMORY (In-Memory Store)
@@ -4332,16 +4333,23 @@ async def api_chat(request: StarletteRequest):
                 if len(result_text) > 8000:
                     result_text = result_text[:8000] + "... [truncated]"
 
+                # DLP pass before the result leaves the tool boundary. The
+                # hash-chained audit log inside policy_and_approvals already
+                # captured the un-redacted record, so the security team keeps
+                # a truthful trail; only what flows back to the LLM and the
+                # API response is sanitised.
+                redacted_result_text = _maybe_redact_output(result_text)
+
                 all_tool_results.append({
                     "tool": tool_name,
-                    "result_preview": result_text[:500],
+                    "result_preview": redacted_result_text[:500],
                     "turn": turn + 1,
                 })
 
                 function_response_parts.append({
                     "functionResponse": {
                         "name": tool_name,
-                        "response": {"content": result_text},
+                        "response": {"content": redacted_result_text},
                     }
                 })
 

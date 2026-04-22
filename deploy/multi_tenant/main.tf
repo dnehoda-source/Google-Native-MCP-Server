@@ -44,9 +44,12 @@ resource "google_artifact_registry_repository" "mcp_boss" {
 }
 
 locals {
-  # Create one Secret Manager secret per non-empty sensitive value.
-  # Keys with empty values are skipped entirely (the installer populates them later).
-  active_secrets = {
+  # Always create the stub secret for every declared credential slot so the
+  # Cloud Run service can reference it. Secret *versions* are only created when
+  # an initial plaintext value is supplied; the installer / operator can add
+  # versions later via add_keys.sh or gcloud.
+  secret_stubs = var.sensitive_secrets
+  seeded_secrets = {
     for k, v in var.sensitive_secrets : k => v if v != ""
   }
   # Secret name convention: mcp-boss-<lowercased-hyphened-key>
@@ -54,10 +57,14 @@ locals {
     for k, _ in var.sensitive_secrets :
     k => "mcp-boss-${replace(lower(k), "_", "-")}"
   }
+  image_uri = coalesce(
+    var.container_image,
+    "${var.region}-docker.pkg.dev/${var.project_id}/${var.image_repo}/${var.service_name}:latest",
+  )
 }
 
 resource "google_secret_manager_secret" "credentials" {
-  for_each  = local.active_secrets
+  for_each  = local.secret_stubs
   project   = var.project_id
   secret_id = local.secret_name[each.key]
   replication {
@@ -67,13 +74,13 @@ resource "google_secret_manager_secret" "credentials" {
 }
 
 resource "google_secret_manager_secret_version" "credentials" {
-  for_each    = local.active_secrets
+  for_each    = local.seeded_secrets
   secret      = google_secret_manager_secret.credentials[each.key].id
   secret_data = each.value
 }
 
 resource "google_secret_manager_secret_iam_member" "sa_accessor" {
-  for_each  = local.active_secrets
+  for_each  = local.secret_stubs
   project   = var.project_id
   secret_id = google_secret_manager_secret.credentials[each.key].secret_id
   role      = "roles/secretmanager.secretAccessor"
@@ -88,7 +95,7 @@ resource "google_cloud_run_v2_service" "mcp_boss" {
   template {
     service_account = local.compute_sa_email
     containers {
-      image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.image_repo}/mcp-boss:latest"
+      image = local.image_uri
       env {
         name  = "SECOPS_PROJECT_ID"
         value = var.project_id
@@ -100,6 +107,22 @@ resource "google_cloud_run_v2_service" "mcp_boss" {
       env {
         name  = "SECOPS_REGION"
         value = var.secops_region
+      }
+      env {
+        name  = "OAUTH_CLIENT_ID"
+        value = var.oauth_client_id
+      }
+      env {
+        name  = "ALLOWED_EMAILS"
+        value = var.allowed_emails
+      }
+      env {
+        name  = "ROLE_MAP_JSON"
+        value = var.role_map_json
+      }
+      env {
+        name  = "ENABLE_OUTPUT_REDACTION"
+        value = var.enable_output_redaction ? "1" : "0"
       }
       env {
         name  = "GOOGLE_CHAT_WEBHOOK_URL"
@@ -114,8 +137,11 @@ resource "google_cloud_run_v2_service" "mcp_boss" {
         value = var.audit_path
       }
 
+      # Pull each seeded secret into the container via Secret Manager refs.
+      # Stubs without a version are left unreferenced until populated; the
+      # server treats missing integration creds as "integration disabled".
       dynamic "env" {
-        for_each = local.active_secrets
+        for_each = local.seeded_secrets
         content {
           name = env.key
           value_source {
@@ -131,6 +157,7 @@ resource "google_cloud_run_v2_service" "mcp_boss" {
   depends_on = [
     google_artifact_registry_repository.mcp_boss,
     google_secret_manager_secret_iam_member.sa_accessor,
+    google_secret_manager_secret_version.credentials,
   ]
 }
 
@@ -144,11 +171,16 @@ output "approvals_url" {
 }
 
 output "image_uri" {
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${var.image_repo}/mcp-boss:latest"
+  value       = local.image_uri
   description = "Tag to build and push to"
 }
 
 output "created_secrets" {
-  value       = [for k, _ in local.active_secrets : local.secret_name[k]]
-  description = "Secret Manager secrets created for sensitive credentials"
+  value       = [for k, _ in local.secret_stubs : local.secret_name[k]]
+  description = "Secret Manager secret stubs created for sensitive credentials"
+}
+
+output "seeded_secrets" {
+  value       = [for k, _ in local.seeded_secrets : local.secret_name[k]]
+  description = "Secret Manager secrets that have an initial version populated"
 }

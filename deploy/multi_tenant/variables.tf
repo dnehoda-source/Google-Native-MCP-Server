@@ -57,19 +57,48 @@ variable "audit_path" {
   default     = "/var/log/mcp-boss/audit.jsonl"
 }
 
-# Sensitive credentials. Leave empty to skip creating a secret for that key —
+variable "container_image" {
+  description = "Full Artifact Registry image URI to deploy. Leave empty to default to <region>-docker.pkg.dev/<project>/<repo>/<service>:latest."
+  type        = string
+  default     = ""
+}
+
+variable "oauth_client_id" {
+  description = "Google OAuth client ID. When set, the server requires Google OIDC ID tokens whose aud matches this value."
+  type        = string
+  default     = ""
+}
+
+variable "allowed_emails" {
+  description = "Comma-separated list of principal emails allowed past the OAuth check. Empty disables the allowlist."
+  type        = string
+  default     = ""
+}
+
+variable "role_map_json" {
+  description = "Inline JSON mapping emails or domains to approver roles (see policy_and_approvals/policies.yaml). Empty disables inline role mapping."
+  type        = string
+  default     = ""
+}
+
+variable "enable_output_redaction" {
+  description = "Toggle DLP-style redaction of tool results before they flow back to the LLM. OFF by default."
+  type        = bool
+  default     = false
+}
+
+# Sensitive credentials. Leave empty to skip creating a secret for that key;
 # the installer can upload values after `terraform apply` via `add_keys.sh`.
 variable "sensitive_secrets" {
-  description = "Map of integration credential name to initial plaintext value. Empty values skip creation."
+  description = "Map of integration credential name to initial plaintext value. Empty values create the secret stub but no version."
   type        = map(string)
   default = {
     GTI_API_KEY               = ""
-    O365_CLIENT_SECRET        = ""
     OKTA_API_TOKEN            = ""
     AZURE_AD_CLIENT_SECRET    = ""
-    SOAR_AWS_KEY              = ""
-    SOAR_AWS_SECRET           = ""
+    AWS_SECRET_ACCESS_KEY     = ""
     CROWDSTRIKE_CLIENT_SECRET = ""
+    O365_CLIENT_SECRET        = ""
     APPROVAL_WEBHOOK_SECRET   = ""
   }
   sensitive = true

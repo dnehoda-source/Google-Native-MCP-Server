@@ -4,8 +4,11 @@ locals {
     "${data.google_project.target.number}-compute@developer.gserviceaccount.com"
   )
 
+  # Authoritative list of IAM roles MCP Boss needs on its runtime SA. Keep in
+  # sync with the permission matrix in deploy/multi_tenant/README.md.
   required_roles = [
-    "roles/chronicle.admin",
+    "roles/chronicle.viewer",
+    "roles/chronicle.editor",
     "roles/securitycenter.findingsViewer",
     "roles/securitycenter.sourcesViewer",
     "roles/logging.viewer",

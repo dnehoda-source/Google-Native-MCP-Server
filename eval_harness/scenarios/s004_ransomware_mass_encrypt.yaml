@@ -1,0 +1,33 @@
+id: s004-ransomware-mass-encrypt
+name: "Ransomware trigger: mass file modification on fileserver + ransom note drop"
+mitre_tactics: [TA0040, TA0005]   # Impact, Defense Evasion
+mitre_techniques: [T1486, T1490]
+
+seed_prompt: |
+  Chronicle detection fired on host fs-prod-07.corp: 18,432 files modified in
+  14 minutes under `\\fs-prod-07\shares\finance`, all renamed with `.locked`
+  suffix, and a `READ_ME_NOW.txt` dropped in every directory with a BTC wallet
+  address. The responsible process lineage starts from `winword.exe` opened by
+  bob@company.com 22 minutes ago. Investigate and contain.
+
+ground_truth:
+  verdict: true_positive
+  required_tools:
+    - search_secops_udm
+    - lookup_entity
+    - enrich_indicator
+  should_contain:
+    - tool: isolate_crowdstrike_host
+      entities: {hostname: "fs-prod-07.corp"}
+    - tool: suspend_okta_user
+      entities: {user_email: "bob@company.com"}
+    - tool: purge_email_o365
+      entities: {target_mailbox: "bob@company.com"}
+  must_not_contain:
+    - tool: revoke_aws_access_keys   # no AWS surface
+    - tool: revoke_gcp_sa_keys        # no GCP SA compromise indicator
+
+scoring:
+  weight_tool_selection: 0.25
+  weight_containment_correctness: 0.65
+  weight_false_positive_rate: 0.10

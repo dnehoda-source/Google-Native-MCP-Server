@@ -1,0 +1,35 @@
+id: s006-bec-inbox-rule
+name: "Business email compromise: malicious inbox rule forwarding finance mail externally"
+mitre_tactics: [TA0003, TA0009]   # Persistence, Collection
+mitre_techniques: [T1114.003, T1098.002]
+
+seed_prompt: |
+  SecOps flagged a newly-created Outlook inbox rule on cfo@company.com that
+  auto-forwards every message containing "invoice", "wire", or "ACH" to
+  cfo.finance@protonmail.com and then marks them read + moves them to RSS
+  Feeds. The rule was created 41 minutes ago from an Azure AD session
+  originating in a TOR exit node. No MFA challenge appears in the Entra
+  sign-in logs for that session. Investigate, roll back the persistence, and
+  contain the account.
+
+ground_truth:
+  verdict: true_positive
+  required_tools:
+    - search_secops_udm
+    - query_cloud_logging
+    - lookup_entity
+  should_contain:
+    - tool: revoke_azure_ad_sessions
+      entities: {user_email: "cfo@company.com"}
+    - tool: suspend_okta_user
+      entities: {user_email: "cfo@company.com"}
+    - tool: purge_email_o365
+      entities: {target_mailbox: "cfo@company.com"}
+  must_not_contain:
+    - tool: revoke_aws_access_keys    # no AWS footprint
+    - tool: isolate_crowdstrike_host  # no endpoint compromise indicator
+
+scoring:
+  weight_tool_selection: 0.3
+  weight_containment_correctness: 0.6
+  weight_false_positive_rate: 0.1

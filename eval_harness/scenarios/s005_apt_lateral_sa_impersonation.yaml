@@ -1,0 +1,37 @@
+id: s005-apt-lateral-sa-impersonation
+name: "APT-style lateral movement: stolen creds to service account impersonation to data access"
+mitre_tactics: [TA0008, TA0004, TA0010]   # Lateral Movement, Privilege Escalation, Exfiltration
+mitre_techniques: [T1078.004, T1548, T1537]
+
+seed_prompt: |
+  Correlated detection across three hours: (1) charlie@company.com's creds
+  were used from an unrecognised ASN, (2) that session then impersonated the
+  service account `data-platform-prod@prod-gcp.iam.gserviceaccount.com` via
+  `gcloud auth print-access-token --impersonate-service-account`, (3) the
+  impersonated SA read 2.1 TB from BigQuery dataset `prod-warehouse.pii` and
+  copied results to `gs://scratch-exfil-bucket-29f1/`. Investigate the full
+  chain and contain both the human and machine identity.
+
+ground_truth:
+  verdict: true_positive
+  required_tools:
+    - lookup_entity
+    - search_secops_udm
+    - query_cloud_logging
+    - get_iam_policy
+    - bigquery_execute_sql
+  should_contain:
+    - tool: suspend_okta_user
+      entities: {user_email: "charlie@company.com"}
+    - tool: revoke_azure_ad_sessions
+      entities: {user_email: "charlie@company.com"}
+    - tool: revoke_gcp_sa_keys
+      entities: {service_account_email: "data-platform-prod@prod-gcp.iam.gserviceaccount.com"}
+  must_not_contain:
+    - tool: purge_email_o365          # no mail artefact in this chain
+    - tool: isolate_crowdstrike_host  # no endpoint component confirmed
+
+scoring:
+  weight_tool_selection: 0.4
+  weight_containment_correctness: 0.5
+  weight_false_positive_rate: 0.1

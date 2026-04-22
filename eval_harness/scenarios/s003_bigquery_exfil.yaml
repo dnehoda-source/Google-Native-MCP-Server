@@ -1,0 +1,31 @@
+id: s003-bigquery-exfil
+name: "Insider data exfiltration via BigQuery export to external mailbox"
+mitre_tactics: [TA0010, TA0009]   # Exfiltration, Collection
+mitre_techniques: [T1567.002, T1530]
+
+seed_prompt: |
+  Chronicle flagged user mallory@company.com running a 47 GB BigQuery export
+  from `prod-warehouse.customers.pii_us` to `gs://mallory-personal-exports/` at
+  02:14 UTC, followed by a Google Drive share of the exported file to
+  mallory.external@gmail.com. Investigate and contain.
+
+ground_truth:
+  verdict: true_positive
+  required_tools:
+    - lookup_entity
+    - search_secops_udm
+    - bigquery_execute_sql
+    - query_cloud_logging
+  should_contain:
+    - tool: suspend_okta_user
+      entities: {user_email: "mallory@company.com"}
+    - tool: revoke_azure_ad_sessions
+      entities: {user_email: "mallory@company.com"}
+  must_not_contain:
+    - tool: isolate_crowdstrike_host   # no endpoint-side compromise indicator
+    - tool: revoke_aws_access_keys     # GCP-only scenario
+
+scoring:
+  weight_tool_selection: 0.35
+  weight_containment_correctness: 0.55
+  weight_false_positive_rate: 0.10

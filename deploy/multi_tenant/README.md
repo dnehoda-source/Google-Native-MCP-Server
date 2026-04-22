@@ -1,28 +1,25 @@
-# Multi-tenant deploy (scaffold)
+# Multi-tenant deploy
 
 Goal: one command to install MCP Boss into any GCP project, with no hand-editing
 of `main.py` and no fork.
-
-Status: scaffold. The Terraform here sketches the right shape but is not yet
-exhaustive (IAM bindings, Secret Manager, Artifact Registry, Cloud Run service
-are stubbed). Fill in before shipping v1 of the installer.
 
 ## Target UX
 
 ```bash
 # From inside a target GCP project's Cloud Shell:
 curl -fsSL https://raw.githubusercontent.com/<owner>/MCP-Boss/main/deploy/multi_tenant/install.sh \
-  | bash -s -- --project my-customer-project --region us-central1
+  | bash -s -- --project my-customer-project --customer-id <CHRONICLE_UUID>
 ```
 
 The install script:
 
 1. Enables the required APIs (securitycenter, logging, bigquery, aiplatform, run, artifactregistry, secretmanager).
-2. Grants the Compute Engine default SA the IAM roles listed in `iam.tf`.
-3. Creates Secret Manager entries (empty) for the integrations the customer opts into (GTI, Okta, Azure, AWS, CrowdStrike, O365, SOAR).
-4. Builds the image from the public repo and pushes to the target's Artifact Registry.
-5. Deploys to Cloud Run with `SECOPS_PROJECT_ID=$PROJECT` and `SECOPS_CUSTOMER_ID=$CUSTOMER_ID` passed in as env vars.
-6. Prints the service URL and the `/api/approvals` URL to paste into Google Chat.
+2. Runs `terraform init` + `terraform apply -auto-approve` against this directory.
+3. Grants the Compute Engine default SA the IAM roles listed in `iam.tf`.
+4. Creates Artifact Registry repo and Secret Manager stubs for integration credentials (GTI, Okta, Azure, AWS, CrowdStrike, O365).
+5. Builds the image from the repo root and pushes to the target's Artifact Registry.
+6. Deploys to Cloud Run with `SECOPS_PROJECT_ID`, `SECOPS_CUSTOMER_ID`, `SECOPS_REGION`, `OAUTH_CLIENT_ID`, `ALLOWED_EMAILS`, `ROLE_MAP_JSON` wired from installer flags.
+7. Prints the Cloud Run service URL and the `/api/approvals` URL to paste into Google Chat.
 
 ## What is already abstracted
 
