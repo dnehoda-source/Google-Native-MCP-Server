@@ -178,22 +178,6 @@ def verify_google_id_token(bearer: str, audience: str) -> Optional[Dict[str, str
     return None
 
 
-class AuthMiddleware:
-    """ASGI middleware that enforces Google ID-token auth when OAUTH_CLIENT_ID is set.
-
-    The authenticated principal (email) and their mapped roles are stashed in
-    `scope["state"]["principal"]` and `scope["state"]["roles"]`. When auth is
-    disabled, principal defaults to 'local' with no roles.
-    """
-
-    def __init__(self, app, client_id: Optional[str] = None):
-        self.app = app
-        self.client_id = client_id if client_id is not None else os.environ.get("OAUTH_CLIENT_ID", "")
-        self.exempt = _exempt_prefixes()
-        self.allowed = _allowed_emails()
-        _boot_safety_check(self.client_id)
-
-
 def _boot_safety_check(client_id: str) -> None:
     """Prevent the "auth off + all roles granted" combo from shipping to prod.
 
@@ -223,24 +207,36 @@ def _boot_safety_check(client_id: str) -> None:
             "Do not ship this configuration outside local development."
         )
 
+
+class AuthMiddleware:
+    """ASGI middleware that enforces Google ID-token auth when OAUTH_CLIENT_ID is set.
+
+    The authenticated principal (email) and their mapped roles are stashed in
+    `scope["state"]["principal"]` and `scope["state"]["roles"]`. When auth is
+    disabled, principal defaults to 'local' with no roles.
+    """
+
+    def __init__(self, app, client_id: Optional[str] = None):
+        self.app = app
+        self.client_id = client_id if client_id is not None else os.environ.get("OAUTH_CLIENT_ID", "")
+        self.exempt = _exempt_prefixes()
+        self.allowed = _allowed_emails()
+        _boot_safety_check(self.client_id)
+
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
 
         path = scope.get("path", "") or ""
-
-        # Set up state dict so downstream code can read it.
         state = scope.setdefault("state", {})
 
-        # Local dev / auth disabled: stamp a 'local' principal and pass through.
         if not self.client_id:
             state["principal"] = LOCAL_PRINCIPAL
             state["roles"] = list(KNOWN_ROLES) if os.environ.get("LOCAL_DEV_ALL_ROLES") == "1" else []
             await self.app(scope, receive, send)
             return
 
-        # Exempt paths (health check, static assets) bypass auth.
         for prefix in self.exempt:
             if path.startswith(prefix):
                 state["principal"] = "anonymous"
