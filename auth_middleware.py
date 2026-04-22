@@ -60,6 +60,17 @@ _DEFAULT_EXEMPT_PREFIXES: Tuple[str, ...] = (
     "/static",
 )
 
+# Path prefixes that REQUIRE auth. Anything not in this set is treated as
+# static content (HTML, JS, CSS, favicon) and served without auth so the
+# browser can boot the Google Sign-In flow. Once the page loads, its JS
+# attaches the ID token to every API call below.
+_PROTECTED_PREFIXES: Tuple[str, ...] = (
+    "/api/",
+    "/mcp",
+    "/sse",
+    "/messages/",
+)
+
 
 def _load_role_map() -> Dict[str, List[str]]:
     """Load e-mail (or @domain) -> [role, ...] map from env or file."""
@@ -243,6 +254,16 @@ class AuthMiddleware:
                 state["roles"] = []
                 await self.app(scope, receive, send)
                 return
+
+        # Static content (HTML, JS, CSS, favicon) served unauthenticated so
+        # the browser can boot the Google Sign-In flow. The page's JS attaches
+        # the ID token to every subsequent API call under the protected
+        # prefixes below.
+        if not any(path.startswith(p) for p in _PROTECTED_PREFIXES):
+            state["principal"] = "anonymous"
+            state["roles"] = []
+            await self.app(scope, receive, send)
+            return
 
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
         auth_header = headers.get("authorization", "")
