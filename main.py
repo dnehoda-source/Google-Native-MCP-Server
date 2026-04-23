@@ -300,6 +300,18 @@ SECOPS_BASE_URL = (
     f"/instances/{SECOPS_CUSTOMER_ID}"
 )
 
+# Siemplify SOAR REST API (legacy, pre-migration to Google SecOps SOAR v1alpha).
+# This tenant is NOT on the new API yet, so case listings go through the
+# Siemplify AppKey-authenticated endpoints instead of chronicle.list_cases.
+SIEMPLIFY_URL = os.getenv("SIEMPLIFY_URL", "https://linus2.siemplify-soar.com")
+SIEMPLIFY_API_KEY = _secret("SIEMPLIFY_API_KEY")
+SIEMPLIFY_BASE = f"{SIEMPLIFY_URL}/api/external/v1"
+_SIEMPLIFY_PRIORITY_INV = {-1: "INFO", 0: "INFORMATIONAL", 40: "LOW", 60: "MEDIUM", 80: "HIGH", 100: "CRITICAL"}
+
+
+def _siemplify_headers() -> dict:
+    return {"AppKey": SIEMPLIFY_API_KEY, "Content-Type": "application/json"}
+
 # ═══════════════════════════════════════════════════════════════
 # LOGGING
 # ═══════════════════════════════════════════════════════════════
@@ -1974,38 +1986,31 @@ def get_finding_remediation(project_id: str = "", finding_id: str = "") -> str:
 
 @app_mcp.tool()
 def list_cases() -> str:
-    """List all SOAR cases from Google SecOps. Returns case IDs, titles, priorities, and statuses."""
+    """List SOAR cases from Siemplify (newest first). Returns case IDs, titles, priorities, and statuses."""
     try:
-        client = SecOpsClient()
-        chronicle = client.chronicle(
-            customer_id=SECOPS_CUSTOMER_ID,
-            project_id=SECOPS_PROJECT_ID,
-            region=SECOPS_REGION
+        resp = requests.post(
+            f"{SIEMPLIFY_BASE}/cases/GetCaseCardsByRequest",
+            headers=_siemplify_headers(),
+            json={"pageSize": 100, "pageNumber": 0, "sortBy": "creationTimeUnixTimeInMs", "sortOrder": "DESC"},
+            timeout=30,
+            verify=False,
         )
-        # Auto-paginate; page_size limit alone makes the API return the
-        # oldest slice on this tenant.
-        result = chronicle.list_cases(as_list=True)
-        cases = result if isinstance(result, list) else result.get('cases', []) if isinstance(result, dict) else []
-        # Sort newest-first locally; the API's orderBy is ignored on this tenant.
-        def _k(c):
-            ts = c.get("createTime") or c.get("updateTime") or ""
-            try:
-                cid = int((c.get("name", "").rsplit("/", 1)[-1]) or 0)
-            except Exception:
-                cid = 0
-            return (ts, cid)
-        cases.sort(key=_k, reverse=True)
+        if resp.status_code != 200:
+            return json.dumps({"error": f"Siemplify [{resp.status_code}]", "detail": resp.text[:500]})
+        data = resp.json()
+        cases = data.get("caseCards", data if isinstance(data, list) else [])
+        cases.sort(key=lambda c: c.get("creationTimeUnixTimeInMs", 0) or 0, reverse=True)
         formatted = []
         for c in cases:
             c_dict = c if isinstance(c, dict) else {}
             formatted.append({
-                "id": c_dict.get("name", c_dict.get("caseId", "")),
-                "title": c_dict.get("displayName", c_dict.get("title", "")),
-                "priority": c_dict.get("priority", ""),
+                "id": c_dict.get("id", ""),
+                "title": c_dict.get("title", ""),
+                "priority": _SIEMPLIFY_PRIORITY_INV.get(c_dict.get("priority"), str(c_dict.get("priority", ""))),
                 "status": c_dict.get("status", ""),
-                "create_time": c_dict.get("createTime", ""),
-                "update_time": c_dict.get("updateTime", ""),
-                "assignee": c_dict.get("assignee", ""),
+                "stage": c_dict.get("stage", ""),
+                "creation_time": c_dict.get("creationTimeUnixTimeInMs", ""),
+                "assignee": c_dict.get("assignedUserName", ""),
             })
         return json.dumps({"cases": formatted, "count": len(formatted)})
     except Exception as e:
@@ -3786,38 +3791,19 @@ def secops_list_cases(limit: int = 100) -> str:
     """List SOAR cases (newest first). Returns case IDs, titles, and statuses."""
     try:
         limit = min(max(1, limit), 1000)
-        client = SecOpsClient()
-        chronicle = client.chronicle(customer_id=SECOPS_CUSTOMER_ID, project_id=SECOPS_PROJECT_ID, region=SECOPS_REGION)
-        cases: list = []
-        try:
-            from secops.chronicle.case import get_cases as _legacy_list_cases
-            page_token = None
-            pages = 0
-            while pages < 20:
-                resp = _legacy_list_cases(chronicle, page_size=1000, page_token=page_token)
-                batch = resp.get("cases") if isinstance(resp, dict) else None
-                if not batch:
-                    break
-                cases.extend(batch)
-                page_token = resp.get("nextPageToken")
-                pages += 1
-                if not page_token:
-                    break
-        except Exception as legacy_err:
-            logger.warning(f"legacyListCases failed, falling back: {legacy_err}")
-            result = chronicle.list_cases(as_list=True)
-            cases = result if isinstance(result, list) else (result.get('cases', []) if isinstance(result, dict) else [])
-
-        def _k(c):
-            ts = c.get("createTime") or c.get("updateTime") or ""
-            try:
-                cid = int((c.get("name", "").rsplit("/", 1)[-1]) or c.get("caseId") or 0)
-            except Exception:
-                cid = 0
-            return (ts, cid)
-        cases.sort(key=_k, reverse=True)
-        top = cases[:limit]
-        return json.dumps({"count": len(top), "cases": top, "total_seen": len(cases)})
+        resp = requests.post(
+            f"{SIEMPLIFY_BASE}/cases/GetCaseCardsByRequest",
+            headers=_siemplify_headers(),
+            json={"pageSize": limit, "pageNumber": 0, "sortBy": "creationTimeUnixTimeInMs", "sortOrder": "DESC"},
+            timeout=30,
+            verify=False,
+        )
+        if resp.status_code != 200:
+            return json.dumps({"error": f"Siemplify [{resp.status_code}]", "detail": resp.text[:500]})
+        data = resp.json()
+        cases = data.get("caseCards", data if isinstance(data, list) else [])
+        cases.sort(key=lambda c: c.get("creationTimeUnixTimeInMs", 0) or 0, reverse=True)
+        return json.dumps({"count": len(cases[:limit]), "cases": cases[:limit], "total_seen": data.get("filteredCasesCount", len(cases))})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -5250,47 +5236,33 @@ def get_last_cases(count: int = 5, n: int = 0, N: int = 0, num_cases: int = 0, l
             count = val
             break
     try:
-        client = SecOpsClient()
-        chronicle = client.chronicle(
-            customer_id=SECOPS_CUSTOMER_ID,
-            project_id=SECOPS_PROJECT_ID,
-            region=SECOPS_REGION
+        # This tenant is still on legacy Siemplify SOAR; use its REST API.
+        resp = requests.post(
+            f"{SIEMPLIFY_BASE}/cases/GetCaseCardsByRequest",
+            headers=_siemplify_headers(),
+            json={"pageSize": max(count, 50), "pageNumber": 0, "sortBy": "creationTimeUnixTimeInMs", "sortOrder": "DESC"},
+            timeout=30,
+            verify=False,
         )
-        # v1beta /cases caps at ~4400 cases on this tenant and excludes newer
-        # ones. The legacy:legacyListCases v1alpha endpoint is what the SOAR
-        # UI actually uses and returns every case. Page through it manually
-        # and stop as soon as we have enough for the requested count.
-        cases: list = []
-        try:
-            from secops.chronicle.case import get_cases as _legacy_list_cases
-            page_token = None
-            pages = 0
-            while pages < 20:  # hard safety cap
-                resp = _legacy_list_cases(chronicle, page_size=1000, page_token=page_token)
-                batch = resp.get("cases") if isinstance(resp, dict) else None
-                if not batch:
-                    break
-                cases.extend(batch)
-                page_token = resp.get("nextPageToken")
-                pages += 1
-                if not page_token:
-                    break
-        except Exception as legacy_err:
-            # Fall back to list_cases if the legacy endpoint is unavailable.
-            logger.warning(f"legacyListCases failed, falling back: {legacy_err}")
-            result = chronicle.list_cases(as_list=True)
-            cases = result if isinstance(result, list) else []
-
-        def _case_sort_key(c):
-            ts = c.get("createTime") or c.get("updateTime") or ""
-            try:
-                cid = int((c.get("name", "").rsplit("/", 1)[-1]) or c.get("caseId") or 0)
-            except Exception:
-                cid = 0
-            return (ts, cid)
-        cases.sort(key=_case_sort_key, reverse=True)
-        top = cases[:count]
-        return json.dumps({"count": len(top), "cases": top, "total_seen": len(cases)})
+        if resp.status_code == 200:
+            data = resp.json()
+            cases_raw = data.get("caseCards", data if isinstance(data, list) else [])
+            def _ts(c):
+                return c.get("creationTimeUnixTimeInMs", 0) or 0
+            cases_raw.sort(key=_ts, reverse=True)
+            formatted = []
+            for c in cases_raw[:count]:
+                formatted.append({
+                    "id": c.get("id", ""),
+                    "title": c.get("title", ""),
+                    "priority": _SIEMPLIFY_PRIORITY_INV.get(c.get("priority"), str(c.get("priority", ""))),
+                    "status": c.get("status", ""),
+                    "stage": c.get("stage", ""),
+                    "creation_time": c.get("creationTimeUnixTimeInMs", ""),
+                    "assignee": c.get("assignedUserName", ""),
+                })
+            return json.dumps({"count": len(formatted), "cases": formatted, "total_seen": data.get("filteredCasesCount", len(cases_raw))})
+        return json.dumps({"error": f"Siemplify [{resp.status_code}]", "detail": resp.text[:500]})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
