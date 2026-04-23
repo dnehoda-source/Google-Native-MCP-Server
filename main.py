@@ -321,6 +321,11 @@ SECOPS_BASE_URL = (
 SIEMPLIFY_URL = os.getenv("SIEMPLIFY_URL", "https://linus2.siemplify-soar.com")
 SIEMPLIFY_API_KEY = _secret("SIEMPLIFY_API_KEY")
 SIEMPLIFY_BASE = f"{SIEMPLIFY_URL}/api/external/v1"
+# TLS verification for Siemplify. Default to True; set
+# SIEMPLIFY_TLS_VERIFY=false ONLY if your Siemplify deployment uses an
+# internal CA that is not trusted by the Cloud Run runtime and you have
+# compensating controls (VPC-internal network, mTLS, etc.).
+SIEMPLIFY_TLS_VERIFY = os.getenv("SIEMPLIFY_TLS_VERIFY", "true").lower() != "false"
 _SIEMPLIFY_PRIORITY_INV = {-1: "INFO", 0: "INFORMATIONAL", 40: "LOW", 60: "MEDIUM", 80: "HIGH", 100: "CRITICAL"}
 
 
@@ -2125,7 +2130,7 @@ def list_cases() -> str:
             headers=_siemplify_headers(),
             json={"pageSize": 100, "pageNumber": 0, "sortBy": "creationTimeUnixTimeInMs", "sortOrder": "DESC"},
             timeout=30,
-            verify=False,
+            verify=SIEMPLIFY_TLS_VERIFY,
         )
         if resp.status_code != 200:
             return json.dumps({"error": f"Siemplify [{resp.status_code}]", "detail": resp.text[:500]})
@@ -3926,7 +3931,7 @@ def secops_list_cases(limit: int = 100) -> str:
             headers=_siemplify_headers(),
             json={"pageSize": limit, "pageNumber": 0, "sortBy": "creationTimeUnixTimeInMs", "sortOrder": "DESC"},
             timeout=30,
-            verify=False,
+            verify=SIEMPLIFY_TLS_VERIFY,
         )
         if resp.status_code != 200:
             return json.dumps({"error": f"Siemplify [{resp.status_code}]", "detail": resp.text[:500]})
@@ -5205,14 +5210,75 @@ _starlette_app = Starlette(
 # Wire /api/approvals/* and /api/audit/verify routes into the Starlette app.
 register_http_routes(_starlette_app, gate)
 
-# Auth sits at the outermost layer so /mcp, /sse, /api/*, everything is gated.
+RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "60"))
+import collections as _collections
+_rate_windows: dict = {}
+
+
+class RateLimitMiddleware:
+    """Per-principal sliding-window rate limit in front of AuthMiddleware.
+
+    Counts requests/minute per authenticated principal (falls back to
+    client IP when the request is unauthenticated). When RATE_LIMIT_RPM
+    is exceeded, returns 429 with a Retry-After header. Single-instance
+    in-memory; horizontal scale needs a shared store.
+    """
+
+    EXEMPT = ("/health", "/static", "/api/auth-config")
+
+    def __init__(self, app, rpm: int = RATE_LIMIT_RPM):
+        self.app = app
+        self.rpm = max(1, int(rpm))
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or self.rpm <= 0:
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "") or ""
+        if any(path.startswith(p) for p in self.EXEMPT):
+            await self.app(scope, receive, send)
+            return
+
+        # Prefer authenticated principal when AuthMiddleware has already
+        # run. But RateLimitMiddleware wraps OUTSIDE auth so scope.state
+        # is empty on ingress; use IP instead, fall back to X-Forwarded-For.
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        key = headers.get("x-forwarded-for", "").split(",")[0].strip() or (scope.get("client") or ("",))[0]
+
+        import time as _time
+        now = _time.time()
+        window = _rate_windows.setdefault(key, _collections.deque())
+        while window and (now - window[0]) > 60.0:
+            window.popleft()
+        if len(window) >= self.rpm:
+            retry = max(1, int(60.0 - (now - window[0])))
+            body = json.dumps({
+                "error": "rate_limit_exceeded",
+                "detail": f"{self.rpm} requests/minute limit hit",
+                "retry_after_seconds": retry,
+            }).encode("utf-8")
+            await send({
+                "type": "http.response.start",
+                "status": 429,
+                "headers": [(b"content-type", b"application/json"),
+                            (b"retry-after", str(retry).encode())],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
+        window.append(now)
+        await self.app(scope, receive, send)
+
+
+# Middleware stack (outer → inner): RateLimit → Auth → MCP transport → Starlette
 # When OAUTH_CLIENT_ID is unset, AuthMiddleware is a no-op (local dev path).
 # Expose as an async function so uvicorn's ASGI 2/3 auto-detection cannot
 # misidentify the middleware instance as a legacy ASGI 2 callable.
 _auth_mw = AuthMiddleware(MCPMiddleware(_starlette_app))
+_rate_mw = RateLimitMiddleware(_auth_mw)
 
 async def app(scope, receive, send):
-    await _auth_mw(scope, receive, send)
+    await _rate_mw(scope, receive, send)
 
 if __name__ == "__main__":
     import uvicorn
@@ -5390,7 +5456,7 @@ def get_last_cases(count: int = 5, n: int = 0, N: int = 0, num_cases: int = 0, l
             headers=_siemplify_headers(),
             json={"pageSize": max(count, 50), "pageNumber": 0, "sortBy": "creationTimeUnixTimeInMs", "sortOrder": "DESC"},
             timeout=30,
-            verify=False,
+            verify=SIEMPLIFY_TLS_VERIFY,
         )
         if resp.status_code == 200:
             data = resp.json()

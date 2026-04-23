@@ -966,13 +966,19 @@ function stopTimer() {
     if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 }
 
+let currentAbort = null;
+
 async function sendMessage() {
     const text = input.value.trim();
     if (!text || sendBtn.disabled) return;
     lastMsg = text;
     input.value = '';
     addMsg('user', text);
-    sendBtn.disabled = true;
+    // Button flips to "Stop" mode while a request is in flight; clicking
+    // aborts the fetch client-side and resets the UI.
+    sendBtn.disabled = false;
+    sendBtn.innerHTML = '<span>Stop</span><span>■</span>';
+    sendBtn.onclick = cancelMessage;
     startTimer();
 
     if (text.toLowerCase() === 'tools') {
@@ -984,11 +990,13 @@ async function sendMessage() {
     }
 
     showTyping();
+    currentAbort = new AbortController();
     try {
         const resp = await fetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', ...getAuthHeaders()},
-            body: JSON.stringify({message: text})
+            body: JSON.stringify({message: text}),
+            signal: currentAbort.signal,
         });
         if (resp.status === 401) {
             hideTyping();
@@ -1007,15 +1015,28 @@ async function sendMessage() {
         else addMsg('error', 'No response received.');
     } catch(e) {
         hideTyping();
-        addMsg('error', 'Request failed: ' + e.message);
+        if (e.name === 'AbortError') {
+            addMsg('error', 'Cancelled. The server may still be processing your previous request; results will be discarded.');
+        } else {
+            addMsg('error', 'Request failed: ' + e.message);
+        }
     }
+    currentAbort = null;
     stopTimer();
     resetBtn();
+}
+
+function cancelMessage() {
+    if (currentAbort) {
+        try { currentAbort.abort(); } catch(e) {}
+        currentAbort = null;
+    }
 }
 
 function resetBtn() {
     stopTimer();
     sendBtn.disabled = false;
+    sendBtn.onclick = sendMessage;
     sendBtn.innerHTML = '<span>Send</span><span>↑</span>';
 }
 
