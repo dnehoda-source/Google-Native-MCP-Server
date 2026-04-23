@@ -1722,18 +1722,30 @@ def get_ip_report(ip_address: str = "", ip: str = "", address: str = "", host: s
 
 @app_mcp.tool()
 def search_threat_actors(query: str = "", actor_query: str = "", threat_actor_query: str = "", name: str = "", actor: str = "", limit: int = 10, days_back: int = 90) -> str:
-    """Hunt a named threat actor (APT28, APT29, Lazarus, Kimsuky, Fancy Bear, etc.) across your SecOps tenant.
+    """Look up ANY Mandiant GTI catalog entry by name and correlate with your tenant.
 
-    query: the threat actor name or alias. Examples:
-        query="APT28"
-        query="Fancy Bear"
-        query="Lazarus"
-    Alias params (name/actor/actor_query/threat_actor_query) all work as
-    synonyms for query.
+    Works for every Mandiant collection type — use this for any question of the
+    form 'what is X', 'look up X in threat intel', 'hunt X', 'find IOCs for X':
+      - Threat actors: APT28, APT29, Lazarus, Kimsuky, Fancy Bear, UNC3973...
+      - Malware families: BASTA, PETYA, BEATDROP, Cobalt Strike, Mimikatz...
+      - Vulnerabilities: RedSun, MVE-2026-18312, CVE-2024-XXXX, Follina...
+      - Campaigns: SolarWinds, MOVEit, codename operations...
+      - Reports and software toolkits.
 
-    Returns IOCs Mandiant attributes to the actor, matches observed in your
-    SecOps UDM within days_back (default 90), and the alias set expanded
-    automatically (e.g. APT28 -> Fancy Bear / STRONTIUM / SOFACY).
+    query: the name / alias / CVE / MVE ID. Example:
+        query="APT28", query="RedSun", query="BASTA", query="CVE-2024-1234"
+
+    Returns:
+      - actor_profile: Mandiant collection entry (type, aliases, description,
+        CVE id + CVSS for vulns, motivations/regions/industries for actors,
+        first_seen/last_seen).
+      - indicators: up to `limit` files / domains / IPs / URLs attributed to
+        the entry by Mandiant.
+      - gti_summary_text: a pre-formatted plain-text block the caller should
+        echo verbatim so the analyst sees concrete GTI data, not a vague
+        'Mandiant was consulted' line.
+      - tenant match status: whether any IOC was observed in your SecOps UDM
+        within days_back (default 90).
     """
     try:
         final_query = query or actor_query or threat_actor_query or name or actor
@@ -4621,10 +4633,13 @@ async def api_chat(request: StarletteRequest):
                 "Security Command Center, Google Threat Intelligence, Cloud Logging, SOAR, and "
                 "cross-platform containment (O365, Okta, Azure AD, AWS, GCP, CrowdStrike).\n\n"
                 "ENTRY-POINT ROUTING (pick the right starting tool):\n"
-                "- Named threat actor hunt ('hunt APT28', 'search for Lazarus', 'Fancy Bear IOCs') "
-                "→ call search_threat_actors(query=\"<actor name>\") FIRST. It returns IOCs "
-                "Mandiant attributes to that actor plus any matches in your SecOps UDM. Do NOT "
-                "use autonomous_investigate for named actors; it expects an IP / domain / hash / alert.\n"
+                "- Any named-thing lookup in threat intel — threat actor, malware family, "
+                "vulnerability, campaign, CVE, MVE, code name — ALWAYS call "
+                "search_threat_actors(query=\"<name>\") FIRST. Works for APT28, Lazarus, "
+                "RedSun, MVE-2026-18312, CVE-2024-1234, BASTA, Cobalt Strike, SolarWinds, "
+                "anything in the Mandiant catalog. Returns the collection profile + IOCs + "
+                "whether your tenant has seen any of them. Do NOT use autonomous_investigate "
+                "for named threats; that one expects an IP / domain / hash / alert.\n"
                 "- Specific IOC (IP address, domain, file hash, URL) / alert / SCC finding → call "
                 "autonomous_investigate. It runs identify → enrich → UDM search → assess → detect → "
                 "contain → report.\n"
