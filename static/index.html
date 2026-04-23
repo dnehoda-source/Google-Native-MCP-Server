@@ -3,254 +3,1033 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google SecOps MCP Server</title>
+    <title>MCP Boss — Security Operations</title>
+    <script src="https://accounts.google.com/gsi/client" async></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+        :root {
+            --bg-base:      #060810;
+            --bg-panel:     #0c0f1a;
+            --bg-card:      #111520;
+            --bg-hover:     #161b2e;
+            --border:       #1e2640;
+            --border-bright:#2a3560;
+            --green:        #00ff88;
+            --green-dim:    #00c96a;
+            --green-glow:   rgba(0,255,136,.15);
+            --blue:         #3b82f6;
+            --blue-dim:     #60a5fa;
+            --amber:        #f59e0b;
+            --amber-dim:    #fbbf24;
+            --red:          #ef4444;
+            --red-dim:      #f87171;
+            --purple:       #a855f7;
+            --cyan:         #22d3ee;
+            --text-primary: #e2e8f0;
+            --text-secondary:#94a3b8;
+            --text-muted:   #475569;
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; }
+
         body {
-            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-            background: #0a0a0a;
-            color: #e0e0e0;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
             height: 100vh;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
         }
 
-        /* ── App ── */
-        #app {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
+        /* ─── Scanline overlay ─── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.03) 2px, rgba(0,0,0,.03) 4px);
+            pointer-events: none;
+            z-index: 9999;
         }
 
-        /* ── Header ── */
+        /* ─── Header ─── */
         header {
-            background: #111;
-            border-bottom: 1px solid #333;
-            padding: 12px 24px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            height: 52px;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            gap: 16px;
+            justify-content: space-between;
+            flex-shrink: 0;
+            position: relative;
         }
-        header h1 {
-            font-size: 16px;
-            color: #4ade80;
-            font-weight: 600;
-            white-space: nowrap;
+        header::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--green), var(--blue), transparent);
+            opacity: .4;
         }
-        header .status {
-            font-size: 12px;
-            color: #888;
-            flex: 1;
-            text-align: center;
-        }
-        header .status.connected { color: #4ade80; }
 
-        /* ── Chat ── */
+        .header-left { display: flex; align-items: center; gap: 16px; }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+        .logo-icon {
+            width: 28px; height: 28px;
+            background: linear-gradient(135deg, var(--green), var(--blue));
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            box-shadow: 0 0 12px var(--green-glow);
+        }
+        .logo-text {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: .5px;
+        }
+        .logo-text span { color: var(--green); }
+
+        .badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            letter-spacing: .5px;
+        }
+        .badge-version { background: rgba(59,130,246,.15); color: var(--blue-dim); border: 1px solid rgba(59,130,246,.25); }
+
+        .header-center {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+        .stat-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .stat-pill .dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .stat-pill.online .dot {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green);
+            animation: pulse 2s infinite;
+        }
+        .stat-pill.online { color: var(--green); }
+
+        @keyframes pulse {
+            0%,100% { opacity:1; transform:scale(1); }
+            50% { opacity:.6; transform:scale(.8); }
+        }
+
+        .header-right { display: flex; align-items: center; gap: 12px; }
+
+        .icon-btn {
+            width: 32px; height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px;
+            transition: all .2s;
+        }
+        .icon-btn:hover { border-color: var(--border-bright); color: var(--text-primary); background: var(--bg-hover); }
+
+        /* ─── Main layout ─── */
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ─── Sidebar ─── */
+        .sidebar {
+            width: 240px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .sidebar-section {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .sidebar-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .quick-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 7px 10px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+            text-align: left;
+            transition: all .15s;
+            margin-bottom: 2px;
+        }
+        .quick-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .quick-btn .qicon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+        .quick-btn.danger:hover { background: rgba(239,68,68,.1); color: var(--red-dim); }
+        .quick-btn.success:hover { background: rgba(0,255,136,.08); color: var(--green); }
+
+        .tool-count-display {
+            margin-top: 4px;
+            padding: 8px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .tool-count-num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--green);
+            line-height: 1;
+        }
+        .tool-count-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .integration-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 11px;
+        }
+        .integration-name { color: var(--text-secondary); }
+        .int-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+        }
+        .int-dot.on { background: var(--green); box-shadow: 0 0 4px var(--green); }
+        .int-dot.off { background: var(--text-muted); }
+
+        .sidebar-tools {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+        .sidebar-tools::-webkit-scrollbar { width: 3px; }
+        .sidebar-tools::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-tools::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .tool-item {
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all .1s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tool-item:hover { background: var(--bg-hover); color: var(--text-secondary); }
+
+        /* ─── Chat area ─── */
+        .chat-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
         #chat {
             flex: 1;
             overflow-y: auto;
             padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
-        .message {
-            margin-bottom: 16px;
-            max-width: 900px;
+        #chat::-webkit-scrollbar { width: 4px; }
+        #chat::-webkit-scrollbar-track { background: transparent; }
+        #chat::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+        /* ─── Messages ─── */
+        .msg { display: flex; gap: 12px; max-width: 100%; animation: fadeIn .2s ease; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+        .msg-avatar {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            margin-top: 2px;
         }
-        .message .role {
+        .msg.user .msg-avatar { background: rgba(59,130,246,.2); border: 1px solid rgba(59,130,246,.3); }
+        .msg.assistant .msg-avatar { background: rgba(0,255,136,.1); border: 1px solid rgba(0,255,136,.2); }
+        .msg.tool .msg-avatar { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.2); }
+        .msg.error .msg-avatar { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.2); }
+
+        .msg-body { flex: 1; min-width: 0; }
+        .msg-meta {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .msg-role {
+            font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
-            margin-bottom: 4px;
+            letter-spacing: .5px;
         }
-        .message .role.user { color: #60a5fa; }
-        .message .role.assistant { color: #4ade80; }
-        .message .role.tool { color: #f59e0b; }
-        .message .role.error { color: #ef4444; }
-        .message .content {
-            background: #161616;
-            border: 1px solid #2a2a2a;
-            border-radius: 8px;
+        .msg.user .msg-role { color: var(--blue-dim); }
+        .msg.assistant .msg-role { color: var(--green); }
+        .msg.tool .msg-role { color: var(--amber-dim); }
+        .msg.error .msg-role { color: var(--red-dim); }
+        .msg-time { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted); }
+
+        .msg-bubble {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
             padding: 12px 16px;
-            font-size: 13px;
-            line-height: 1.6;
-            white-space: pre-wrap;
+            font-size: 13.5px;
+            line-height: 1.65;
+            color: var(--text-primary);
             word-break: break-word;
         }
-        .message .content.tool-result {
-            background: #0d1117;
-            border-color: #f59e0b33;
-            font-size: 12px;
-            max-height: 400px;
-            overflow-y: auto;
+        .msg.user .msg-bubble {
+            background: rgba(59,130,246,.07);
+            border-color: rgba(59,130,246,.2);
+        }
+        .msg.assistant .msg-bubble {
+            border-color: rgba(0,255,136,.1);
+        }
+        .msg.error .msg-bubble {
+            background: rgba(239,68,68,.06);
+            border-color: rgba(239,68,68,.2);
+            color: var(--red-dim);
         }
 
-        /* ── Input ── */
-        #input-area {
-            background: #111;
-            border-top: 1px solid #333;
-            padding: 16px 24px;
-            display: flex;
-            gap: 12px;
-        }
-        #input-area input {
-            flex: 1;
-            background: #1a1a1a;
-            border: 1px solid #333;
+        /* Tool trace card */
+        .tool-trace {
+            background: #080d18;
+            border: 1px solid rgba(245,158,11,.2);
             border-radius: 8px;
-            padding: 12px 16px;
-            color: #e0e0e0;
-            font-family: inherit;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .tool-trace-header {
+            background: rgba(245,158,11,.08);
+            border-bottom: 1px solid rgba(245,158,11,.15);
+            padding: 7px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .tool-trace-name {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--amber-dim);
+        }
+        .tool-trace-status {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .tool-trace-status.ok { background: rgba(0,255,136,.1); color: var(--green); }
+        .tool-trace-status.err { background: rgba(239,68,68,.1); color: var(--red-dim); }
+        .tool-trace-body {
+            padding: 10px 12px;
+            font-size: 11px;
+            color: #94a3b8;
+            max-height: 280px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.5;
+        }
+        .tool-trace-body::-webkit-scrollbar { width: 3px; }
+        .tool-trace-body::-webkit-scrollbar-thumb { background: var(--border); }
+
+        /* Markdown-like rendering */
+        .msg-bubble code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            background: rgba(255,255,255,.06);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 1px 5px;
+            color: var(--cyan);
+        }
+        .msg-bubble strong { color: #fff; font-weight: 600; }
+        .msg-bubble em { color: var(--text-secondary); font-style: italic; }
+
+        /* ─── Typing indicator ─── */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 14px 16px;
+        }
+        .typing-dot {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: typingBounce 1.2s infinite;
+        }
+        .typing-dot:nth-child(2) { animation-delay: .2s; }
+        .typing-dot:nth-child(3) { animation-delay: .4s; }
+        @keyframes typingBounce {
+            0%,60%,100% { transform: translateY(0); opacity:.5; }
+            30% { transform: translateY(-5px); opacity:1; }
+        }
+
+        /* ─── Input area ─── */
+        #input-area {
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            padding: 16px 24px;
+            flex-shrink: 0;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .input-wrap {
+            flex: 1;
+            position: relative;
+        }
+        #input {
+            width: 100%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-bright);
+            border-radius: 10px;
+            padding: 12px 16px 12px 42px;
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
             font-size: 14px;
             outline: none;
+            transition: border-color .2s, box-shadow .2s;
+            resize: none;
+            line-height: 1.5;
         }
-        #input-area input:focus { border-color: #4ade80; }
-        #input-area input::placeholder { color: #555; }
-        #input-area button {
-            background: #4ade80;
-            color: #000;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 24px;
-            font-family: inherit;
+        #input:focus {
+            border-color: var(--green-dim);
+            box-shadow: 0 0 0 3px var(--green-glow);
+        }
+        #input::placeholder { color: var(--text-muted); }
+
+        .input-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
             font-size: 14px;
+            pointer-events: none;
+        }
+
+        .input-hint {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 7px;
+            text-align: center;
+        }
+        .input-hint kbd {
+            background: var(--bg-hover);
+            border: 1px solid var(--border-bright);
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        #send-btn {
+            height: 46px;
+            padding: 0 20px;
+            background: linear-gradient(135deg, var(--green-dim), #00b85c);
+            border: none;
+            border-radius: 10px;
+            color: #000;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
             font-weight: 700;
             cursor: pointer;
+            transition: all .2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+            box-shadow: 0 0 12px rgba(0,200,100,.3);
         }
-        #input-area button:hover { background: #22c55e; }
-        #input-area button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        #send-btn:hover:not(:disabled) {
+            background: linear-gradient(135deg, var(--green), var(--green-dim));
+            box-shadow: 0 0 20px rgba(0,255,136,.4);
+            transform: translateY(-1px);
+        }
+        #send-btn:disabled {
+            background: var(--bg-hover);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* ─── Welcome grid ─── */
+        .welcome-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .welcome-chip {
+            background: var(--bg-hover);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all .15s;
+        }
+        .welcome-chip:hover {
+            border-color: var(--green-dim);
+            color: var(--green);
+            background: var(--green-glow);
+        }
+
+        /* ─── Misc ─── */
+        .sep {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+            margin: 4px 0;
+        }
     </style>
 </head>
 <body>
 
-    <!-- ════════════ App ════════════ -->
-    <div id="app">
-        <header>
-            <h1>🔒 Google SecOps MCP</h1>
-            <div class="status" id="status">Connecting...</div>
-        </header>
+<!-- ── Google Auth Overlay ── -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:var(--bg-base);z-index:10000;flex-direction:column;align-items:center;justify-content:center;gap:32px;">
+    <div style="text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:var(--green);letter-spacing:4px;text-shadow:0 0 20px rgba(0,255,136,.4);">MCP BOSS</div>
+        <div style="color:var(--text-secondary);font-size:13px;margin-top:6px;letter-spacing:2px;">SECURITY OPERATIONS PLATFORM</div>
+    </div>
+    <div style="background:var(--bg-panel);border:1px solid var(--border-bright);border-radius:12px;padding:36px 40px;text-align:center;min-width:320px;box-shadow:0 0 40px rgba(0,255,136,.05);">
+        <div style="color:var(--text-secondary);font-size:13px;margin-bottom:24px;">Authenticate with your Google account to access the platform</div>
+        <div id="google-signin-btn" style="display:flex;justify-content:center;"></div>
+        <div id="auth-error" style="display:none;color:var(--red-dim);font-size:12px;margin-top:16px;"></div>
+    </div>
+    <div style="color:var(--text-muted);font-size:11px;font-family:'JetBrains Mono',monospace;">Access restricted to authorized personnel</div>
+</div>
 
-        <div id="chat"></div>
+<div id="app" style="display:flex;flex-direction:column;height:100vh;">
 
-        <div id="input-area">
-            <input type="text" id="input" placeholder="Ask anything... (e.g., 'check SCC findings' or 'enrich IP 8.8.8.8')" />
-            <button id="send" onclick="sendMessage()">Send</button>
+    <!-- ─── Header ─── -->
+    <header>
+        <div class="header-left">
+            <div class="logo">
+                <div class="logo-icon">🔒</div>
+                <div class="logo-text">MCP<span>Boss</span></div>
+            </div>
+            <span class="badge badge-version" id="ver-badge">v3.2.0</span>
+        </div>
+
+        <div class="header-center">
+            <div class="stat-pill" id="conn-status">
+                <div class="dot"></div>
+                <span>Connecting…</span>
+            </div>
+            <div class="stat-pill" id="tools-status">
+                <div class="dot" style="background:var(--blue);box-shadow:0 0 4px var(--blue)"></div>
+                <span id="tool-count-hdr">— tools</span>
+            </div>
+            <div class="stat-pill" id="project-status">
+                <div class="dot" style="background:var(--purple);box-shadow:0 0 4px var(--purple)"></div>
+                <span id="project-hdr">—</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div id="user-pill" style="display:none;align-items:center;gap:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:20px;padding:4px 12px 4px 4px;cursor:default;">
+                <div id="user-avatar" style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--green),var(--blue));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#000;flex-shrink:0;">?</div>
+                <span id="user-email" style="font-size:11px;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+                <button onclick="signOut()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px;padding:0;margin-left:4px;" title="Sign out">✕</button>
+            </div>
+            <button class="icon-btn" title="Clear chat" onclick="clearChat()">🗑</button>
+            <button class="icon-btn" title="List tools" onclick="insertCommand('list all available tools')">🛠</button>
+            <button class="icon-btn" title="Health check" onclick="insertCommand('run a quick health check on all integrations')">💓</button>
+        </div>
+    </header>
+
+    <!-- ─── Main ─── -->
+    <div class="main">
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <!-- Quick actions -->
+            <div class="sidebar-section">
+                <div class="sidebar-label">Quick Actions</div>
+                <button class="quick-btn" onclick="q('hunt for APT28 indicators in the last 7 days')"><span class="qicon">🎯</span>Hunt APT28</button>
+                <button class="quick-btn" onclick="q('get SCC critical findings')"><span class="qicon">🔍</span>SCC Findings</button>
+                <button class="quick-btn" onclick="q('list the last 10 SOAR cases')"><span class="qicon">📂</span>SOAR Cases</button>
+                <button class="quick-btn" onclick="q('search SecOps UDM for failed logins in the last 24 hours')"><span class="qicon">🔐</span>Failed Logins</button>
+                <button class="quick-btn" onclick="q('list active Chronicle detection rules')"><span class="qicon">📡</span>Active Rules</button>
+                <button class="quick-btn success" onclick="q('enrich indicator 8.8.8.8')"><span class="qicon">🌐</span>Enrich IOC</button>
+                <button class="quick-btn danger" onclick="q('list GCP service accounts with user-managed keys')"><span class="qicon">⚠️</span>SA Key Audit</button>
+            </div>
+
+            <!-- Stats -->
+            <div class="sidebar-section">
+                <div class="sidebar-label">Server Status</div>
+                <div class="tool-count-display">
+                    <div class="tool-count-num" id="sb-tool-count">—</div>
+                    <div class="tool-count-label">tools available</div>
+                </div>
+                <div style="margin-top:10px;">
+                    <div class="integration-row"><span class="integration-name">GTI</span><div class="int-dot off" id="int-gti"></div></div>
+                    <div class="integration-row"><span class="integration-name">Chronicle</span><div class="int-dot off" id="int-chronicle"></div></div>
+                    <div class="integration-row"><span class="integration-name">Siemplify</span><div class="int-dot off" id="int-soar"></div></div>
+                    <div class="integration-row"><span class="integration-name">SCC</span><div class="int-dot off" id="int-scc"></div></div>
+                    <div class="integration-row"><span class="integration-name">O365</span><div class="int-dot off" id="int-o365"></div></div>
+                </div>
+            </div>
+
+            <!-- Tool list -->
+            <div class="sidebar-section" style="padding-bottom:6px;">
+                <div class="sidebar-label">Tools</div>
+            </div>
+            <div class="sidebar-tools" id="tool-list-sidebar">
+                <div style="font-size:11px;color:var(--text-muted);padding:4px 8px;">Loading…</div>
+            </div>
+        </div>
+
+        <!-- Chat -->
+        <div class="chat-wrapper">
+            <div id="chat"></div>
+
+            <div id="input-area">
+                <div class="input-row">
+                    <div class="input-wrap">
+                        <span class="input-icon">⚡</span>
+                        <input type="text" id="input"
+                            placeholder="Ask anything — 'investigate APT28', 'enrich 1.2.3.4', 'list SOAR cases'…" />
+                    </div>
+                    <button id="send-btn" onclick="sendMessage()">
+                        <span>Send</span><span>↑</span>
+                    </button>
+                </div>
+                <div class="input-hint"><kbd>Enter</kbd> to send · <kbd>↑</kbd> recall last · type <kbd>tools</kbd> to list all</div>
+            </div>
         </div>
     </div>
+</div>
 
-    <script>
-        // ── State ──
-        let tools = [];
+<script>
+// ── Marked-lite: minimal markdown renderer ──
+function renderMd(text) {
+    return text
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        // code blocks
+        .replace(/```[\s\S]*?```/g, m => `<pre style="background:rgba(255,255,255,.04);border:1px solid #1e2640;border-radius:6px;padding:10px 12px;overflow-x:auto;margin:6px 0;font-family:'JetBrains Mono',monospace;font-size:11px;color:#94a3b8;white-space:pre-wrap;">${m.slice(3,m.length-3).replace(/^[\w-]*\n/,'')}</pre>`)
+        // inline code
+        .replace(/`([^`]+)`/g,'<code>$1</code>')
+        // bold
+        .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+        // italic
+        .replace(/\*(.+?)\*/g,'<em>$1</em>')
+        // headers
+        .replace(/^### (.+)$/gm,'<div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px;">$1</div>')
+        .replace(/^## (.+)$/gm,'<div style="font-size:14px;font-weight:700;color:#e2e8f0;margin:10px 0 4px;">$1</div>')
+        .replace(/^# (.+)$/gm,'<div style="font-size:16px;font-weight:700;color:#fff;margin:10px 0 4px;">$1</div>')
+        // bullets
+        .replace(/^[\*\-•] (.+)$/gm,'<div style="display:flex;gap:8px;margin:2px 0;"><span style="color:#00ff88;flex-shrink:0;">▸</span><span>$1</span></div>')
+        // numbered lists
+        .replace(/^(\d+)\. (.+)$/gm,'<div style="display:flex;gap:8px;margin:2px 0;"><span style="color:#60a5fa;flex-shrink:0;font-family:\'JetBrains Mono\',monospace;font-size:11px;">$1.</span><span>$2</span></div>')
+        // line breaks
+        .replace(/\n/g,'<br>');
+}
 
-        const chat = document.getElementById('chat');
-        const input = document.getElementById('input');
-        const sendBtn = document.getElementById('send');
-        const statusEl = document.getElementById('status');
+// ── State ──
+let tools = [];
+let lastMsg = '';
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
 
-        // ── Chat Logic ──
-        async function initChat() {
-            try {
-                const resp = await fetch('/health');
-                const health = await resp.json();
-                statusEl.textContent = `✅ ${health.tools} tools · ${health.project}`;
-                statusEl.className = 'status connected';
+// ── Time ──
+function ts() {
+    return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
 
-                const toolResp = await fetch('/api/tools');
-                if (toolResp.ok) {
-                    tools = await toolResp.json();
-                    showWelcome();
-                }
-            } catch (e) {
-                statusEl.textContent = '❌ Connection failed';
-                addMessage('error', 'Failed to connect to MCP server: ' + e.message);
-            }
+// ── Add message ──
+function addMsg(role, content, isHtml=false) {
+    const avatars = {user:'👤', assistant:'🤖', tool:'⚡', error:'❌'};
+    const roles = {user:'You', assistant:'MCP Boss', tool:'Tool Execution', error:'Error'};
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    const body = isHtml ? content : renderMd(content);
+    div.innerHTML = `
+        <div class="msg-avatar">${avatars[role]||'•'}</div>
+        <div class="msg-body">
+            <div class="msg-meta">
+                <span class="msg-role">${roles[role]||role}</span>
+                <span class="msg-time">${ts()}</span>
+            </div>
+            <div class="msg-bubble">${body}</div>
+        </div>`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+}
+
+// ── Tool trace card ──
+function addToolTrace(raw) {
+    const lines = raw.split('\n\n');
+    const container = document.createElement('div');
+    container.className = 'msg tool';
+    container.innerHTML = `
+        <div class="msg-avatar">⚡</div>
+        <div class="msg-body">
+            <div class="msg-meta">
+                <span class="msg-role">Tool Execution</span>
+                <span class="msg-time">${ts()}</span>
+            </div>
+            <div id="traces-${Date.now()}" class="traces"></div>
+        </div>`;
+    const tracesDiv = container.querySelector('.traces');
+
+    lines.forEach(block => {
+        if (!block.trim()) return;
+        const firstLine = block.split('\n')[0];
+        const rest = block.split('\n').slice(1).join('\n');
+        const isErr = rest.includes('"error"');
+        const card = document.createElement('div');
+        card.className = 'tool-trace';
+        card.style.marginBottom = '6px';
+        card.innerHTML = `
+            <div class="tool-trace-header">
+                <span class="tool-trace-name">${firstLine.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>
+                <span class="tool-trace-status ${isErr?'err':'ok'}">${isErr?'ERROR':'OK'}</span>
+            </div>
+            <div class="tool-trace-body">${rest.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+        tracesDiv.appendChild(card);
+    });
+
+    chat.appendChild(container);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+// ── Typing indicator ──
+let typingEl = null;
+function showTyping() {
+    if (typingEl) return;
+    typingEl = document.createElement('div');
+    typingEl.className = 'msg assistant';
+    typingEl.innerHTML = `
+        <div class="msg-avatar">🤖</div>
+        <div class="msg-body">
+            <div class="msg-meta"><span class="msg-role">MCP Boss</span><span class="msg-time" id="typing-timer">working…</span></div>
+            <div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>
+        </div>`;
+    chat.appendChild(typingEl);
+    chat.scrollTop = chat.scrollHeight;
+}
+function hideTyping() {
+    if (typingEl) { typingEl.remove(); typingEl = null; }
+}
+
+// ── Welcome ──
+function showWelcome(health) {
+    const div = document.createElement('div');
+    div.className = 'msg assistant';
+    div.innerHTML = `
+        <div class="msg-avatar">🤖</div>
+        <div class="msg-body">
+            <div class="msg-meta"><span class="msg-role">MCP Boss</span><span class="msg-time">${ts()}</span></div>
+            <div class="msg-bubble">
+                <strong>MCP Boss ${health.version} connected</strong> — ${health.tools} tools ready on <code>${health.project}</code>
+                <div class="welcome-grid">
+                    <div class="welcome-chip" onclick="q('investigate APT28 threat actor')">🎯 Hunt APT28</div>
+                    <div class="welcome-chip" onclick="q('get all critical SCC findings')">🔍 SCC Critical</div>
+                    <div class="welcome-chip" onclick="q('list the last 5 SOAR cases')">📂 Last Cases</div>
+                    <div class="welcome-chip" onclick="q('enrich indicator 185.220.101.1')">🌐 Enrich IOC</div>
+                    <div class="welcome-chip" onclick="q('search for failed login attempts in the last 24 hours')">🔐 Failed Logins</div>
+                    <div class="welcome-chip" onclick="q('list active Chronicle detection rules')">📡 Active Rules</div>
+                </div>
+            </div>
+        </div>`;
+    chat.appendChild(div);
+}
+
+// ── Auth ──
+let authToken = null;
+let tokenExpiry = 0;
+
+function showLoginOverlay() {
+    document.getElementById('login-overlay').style.display = 'flex';
+}
+function hideLoginOverlay() {
+    document.getElementById('login-overlay').style.display = 'none';
+}
+
+function handleCredentialResponse(response) {
+    authToken = response.credential;
+    try {
+        const payload = JSON.parse(atob(authToken.split('.')[1]));
+        tokenExpiry = payload.exp * 1000;
+        sessionStorage.setItem('mcp_auth_token', authToken);
+        sessionStorage.setItem('mcp_token_expiry', tokenExpiry);
+        showUserPill(payload.email || payload.name || '');
+    } catch(e) {}
+    hideLoginOverlay();
+    init();
+}
+
+function showUserPill(email) {
+    const pill = document.getElementById('user-pill');
+    const avatar = document.getElementById('user-avatar');
+    const emailEl = document.getElementById('user-email');
+    if (!pill) return;
+    pill.style.display = 'flex';
+    emailEl.textContent = email;
+    avatar.textContent = (email[0] || '?').toUpperCase();
+}
+
+function signOut() {
+    authToken = null; tokenExpiry = 0;
+    sessionStorage.removeItem('mcp_auth_token');
+    sessionStorage.removeItem('mcp_token_expiry');
+    document.getElementById('user-pill').style.display = 'none';
+    if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
+    bootAuth();
+}
+
+function getAuthHeaders() {
+    if (!authToken) return {};
+    if (Date.now() > tokenExpiry - 300000) {
+        authToken = null;
+        sessionStorage.removeItem('mcp_auth_token');
+        showLoginOverlay();
+        return {};
+    }
+    return {'Authorization': `Bearer ${authToken}`};
+}
+
+async function bootAuth() {
+    const resp = await fetch('/api/auth-config');
+    const config = await resp.json();
+
+    if (!config.auth_required) {
+        init();
+        return;
+    }
+
+    // Try to restore from session
+    const stored = sessionStorage.getItem('mcp_auth_token');
+    const expiry = parseInt(sessionStorage.getItem('mcp_token_expiry') || '0');
+    if (stored && Date.now() < expiry - 60000) {
+        authToken = stored; tokenExpiry = expiry;
+        try { const p = JSON.parse(atob(stored.split('.')[1])); showUserPill(p.email || p.name || ''); } catch(e) {}
+        init();
+        return;
+    }
+
+    // Need fresh login
+    showLoginOverlay();
+    // Wait for GIS to load then initialize
+    const waitForGIS = setInterval(() => {
+        if (window.google && google.accounts) {
+            clearInterval(waitForGIS);
+            google.accounts.id.initialize({
+                client_id: config.client_id,
+                callback: handleCredentialResponse,
+                auto_select: true,
+            });
+            google.accounts.id.renderButton(
+                document.getElementById('google-signin-btn'),
+                { theme: 'filled_black', size: 'large', text: 'signin_with', shape: 'rectangular' }
+            );
+            google.accounts.id.prompt();
         }
+    }, 100);
+}
 
-        function showWelcome() {
-            let msg = `Connected to Google SecOps MCP Server.\n\n`;
-            msg += `${tools.length} tools available. Try:\n`;
-            msg += `  • "check SCC findings for tito-436719"\n`;
-            msg += `  • "enrich IP 198.51.100.42"\n`;
-            msg += `  • "search SecOps for failed logins"\n`;
-            msg += `  • "list recent detections"\n`;
-            msg += `  • "tools" to see all available tools\n`;
-            addMessage('assistant', msg);
-        }
+// ── Init ──
+async function init() {
+    try {
+        const [hResp, tResp] = await Promise.all([fetch('/health'), fetch('/api/tools')]);
+        const health = await hResp.json();
+        tools = tResp.ok ? await tResp.json() : [];
 
-        function addMessage(role, content) {
-            const div = document.createElement('div');
-            div.className = 'message';
-            div.innerHTML = `
-                <div class="role ${role}">${role}</div>
-                <div class="content ${role === 'tool' ? 'tool-result' : ''}">${escapeHtml(content)}</div>
-            `;
-            chat.appendChild(div);
-            chat.scrollTop = chat.scrollHeight;
-        }
+        // Header
+        document.getElementById('conn-status').className = 'stat-pill online';
+        document.getElementById('conn-status').innerHTML = '<div class="dot"></div><span>Online</span>';
+        document.getElementById('tool-count-hdr').textContent = `${health.tools} tools`;
+        document.getElementById('project-hdr').textContent = health.project || '—';
+        document.getElementById('ver-badge').textContent = `v${health.version}`;
 
-        function escapeHtml(text) {
+        // Sidebar
+        document.getElementById('sb-tool-count').textContent = health.tools;
+        const ints = health.integrations || {};
+        setInt('int-gti', ints.gti);
+        setInt('int-chronicle', true); // SecOps always on
+        setInt('int-soar', true);      // Siemplify always configured
+        setInt('int-scc', true);       // SCC always on
+        setInt('int-o365', ints.o365);
+
+        // Tool list sidebar
+        const sb = document.getElementById('tool-list-sidebar');
+        sb.innerHTML = '';
+        tools.forEach(t => {
             const d = document.createElement('div');
-            d.textContent = text;
-            return d.innerHTML;
-        }
-
-        async function sendMessage() {
-            const text = input.value.trim();
-            if (!text) return;
-
-            addMessage('user', text);
-            input.value = '';
-            sendBtn.disabled = true;
-            sendBtn.textContent = '⏳';
-
-            if (text.toLowerCase() === 'tools') {
-                let toolList = 'Available tools:\n\n';
-                tools.forEach(t => {
-                    toolList += `  ${t.name}\n    ${t.description || ''}\n\n`;
-                });
-                addMessage('assistant', toolList);
-                sendBtn.disabled = false;
-                sendBtn.textContent = 'Send';
-                return;
-            }
-
-            try {
-                const resp = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',  // send/receive cookies for session
-                    body: JSON.stringify({ message: text }),
-                });
-
-                const data = await resp.json();
-
-                // Store session_id for this browser session
-                if (data.session_id && !window._socSessionId) {
-                    window._socSessionId = data.session_id;
-                }
-
-                if (data.tool_called) {
-                    addMessage('tool', `⚡ ${data.tool_called}(${JSON.stringify(data.tool_args)})\n\n${JSON.stringify(data.tool_result, null, 2)}`);
-                }
-                if (data.response) {
-                    addMessage('assistant', data.response);
-                }
-                if (data.error) {
-                    addMessage('error', data.error);
-                }
-            } catch (e) {
-                addMessage('error', 'Request failed: ' + e.message);
-            }
-
-            sendBtn.disabled = false;
-            sendBtn.textContent = 'Send';
-        }
-
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !sendBtn.disabled) sendMessage();
+            d.className = 'tool-item';
+            d.title = t.description || '';
+            d.textContent = t.name;
+            d.onclick = () => { input.value = `call ${t.name}`; input.focus(); };
+            sb.appendChild(d);
         });
 
-        // ── Boot ──
-        initChat();
-    </script>
+        showWelcome(health);
+    } catch(e) {
+        document.getElementById('conn-status').innerHTML = '<div class="dot" style="background:var(--red)"></div><span style="color:var(--red-dim)">Offline</span>';
+        addMsg('error', 'Failed to connect: ' + e.message);
+    }
+}
+
+function setInt(id, on) {
+    const el = document.getElementById(id);
+    if (el) { el.className = 'int-dot ' + (on ? 'on' : 'off'); }
+}
+
+// ── Send ──
+let timerInterval = null;
+
+function startTimer() {
+    let secs = 0;
+    timerInterval = setInterval(() => {
+        secs++;
+        // Update timer in the typing bubble if visible
+        const timerEl = document.getElementById('typing-timer');
+        if (timerEl) timerEl.textContent = `${secs}s elapsed…`;
+        // Also update button
+        sendBtn.innerHTML = `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;">${secs}s</span>`;
+    }, 1000);
+}
+
+function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+async function sendMessage() {
+    const text = input.value.trim();
+    if (!text || sendBtn.disabled) return;
+    lastMsg = text;
+    input.value = '';
+    addMsg('user', text);
+    sendBtn.disabled = true;
+    startTimer();
+
+    if (text.toLowerCase() === 'tools') {
+        stopTimer();
+        let out = `**${tools.length} tools available:**\n\n`;
+        tools.forEach(t => { out += `• **${t.name}** — ${t.description||''}\n`; });
+        addMsg('assistant', out);
+        resetBtn(); return;
+    }
+
+    showTyping();
+    try {
+        const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', ...getAuthHeaders()},
+            body: JSON.stringify({message: text})
+        });
+        if (resp.status === 401) {
+            hideTyping();
+            authToken = null;
+            sessionStorage.removeItem('mcp_auth_token');
+            showLoginOverlay();
+            resetBtn();
+            return;
+        }
+        const data = await resp.json();
+        hideTyping();
+
+        if (data.raw_result_preview) addToolTrace(data.raw_result_preview);
+        if (data.response) addMsg('assistant', data.response);
+        else if (data.error) addMsg('error', data.error);
+        else addMsg('error', 'No response received.');
+    } catch(e) {
+        hideTyping();
+        addMsg('error', 'Request failed: ' + e.message);
+    }
+    stopTimer();
+    resetBtn();
+}
+
+function resetBtn() {
+    stopTimer();
+    sendBtn.disabled = false;
+    sendBtn.innerHTML = '<span>Send</span><span>↑</span>';
+}
+
+function q(text) { input.value = text; sendMessage(); }
+function insertCommand(text) { input.value = text; input.focus(); }
+function clearChat() { chat.innerHTML = ''; }
+
+// ── Keys ──
+input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !sendBtn.disabled) sendMessage();
+    if (e.key === 'ArrowUp' && !input.value) { input.value = lastMsg; e.preventDefault(); }
+});
+
+bootAuth();
+</script>
 </body>
 </html>
