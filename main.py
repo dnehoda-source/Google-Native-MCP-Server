@@ -167,6 +167,9 @@ from google.api_core.exceptions import (
 from mcp.server.fastmcp import FastMCP
 from datetime import datetime, timedelta, timezone
 import uuid
+import contextvars
+
+_request_actor: contextvars.ContextVar[str] = contextvars.ContextVar("_request_actor", default="unknown")
 
 # ═══════════════════════════════════════════════════════════════
 # SESSION MEMORY (In-Memory Store)
@@ -269,7 +272,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 CLAUDE_REGION = os.getenv("CLAUDE_REGION", "global")
 OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "")
-ALLOWED_EMAILS = set(e.strip() for e in os.getenv("ALLOWED_EMAILS", "carter@linus.joonix.net,dnehoda@gmail.com").split(",") if e.strip())
+ALLOWED_EMAILS = set(e.strip() for e in os.getenv("ALLOWED_EMAILS", "").split(",") if e.strip())
 
 SECOPS_BASE_URL = (
     f"https://{SECOPS_REGION}-chronicle.googleapis.com/v1alpha"
@@ -1095,7 +1098,7 @@ def purge_email_o365(target_mailbox: str, message_id: str, purge_type: str = "ha
                                       headers=headers, json={"destinationId": "deleteditems"}, timeout=15)
 
         if del_resp.status_code in (200, 201, 204):
-            logger.info(f"O365 purge: {purge_type} '{subject}' from {target_mailbox}")
+            logger.info(f"O365 purge: {purge_type} '{subject}' from {target_mailbox} [actor={_request_actor.get()}]")
             return json.dumps({"status": "purged", "mailbox": target_mailbox, "subject": subject, "purge_type": purge_type})
         return json.dumps({"error": f"Purge failed [{del_resp.status_code}]", "detail": del_resp.text[:300]})
     except RuntimeError as e:
@@ -1148,7 +1151,7 @@ def suspend_okta_user(user_email: str, clear_sessions: bool = True, confirm: boo
                                          headers=headers, timeout=15)
             results.append(f"Clear sessions: {sess_resp.status_code}")
 
-        logger.info(f"Okta containment: {user_email} suspended, sessions cleared={clear_sessions}")
+        logger.info(f"Okta containment: {user_email} suspended, sessions cleared={clear_sessions} [actor={_request_actor.get()}]")
         return json.dumps({"status": "contained", "user": user_email, "actions": results})
     except Exception as e:
         return json.dumps({"error": f"Okta error: {e}"})
@@ -1184,7 +1187,7 @@ def revoke_azure_ad_sessions(user_email: str, confirm: bool = False) -> str:
                               headers=headers, timeout=15)
 
         if resp.status_code == 200:
-            logger.info(f"Azure AD sessions revoked for {user_email}")
+            logger.info(f"Azure AD sessions revoked for {user_email} [actor={_request_actor.get()}]")
             return json.dumps({"status": "revoked", "user": user_email})
         return json.dumps({"error": f"Revoke failed [{resp.status_code}]", "detail": resp.text[:300]})
     except Exception as e:
@@ -1220,7 +1223,7 @@ def revoke_aws_access_keys(target_user: str, confirm: bool = False) -> str:
                 if key["Status"] == "Active":
                     iam.update_access_key(UserName=target_user, AccessKeyId=key["AccessKeyId"], Status="Inactive")
                     disabled.append(key["AccessKeyId"])
-        logger.info(f"AWS keys disabled for {target_user}: {disabled}")
+        logger.info(f"AWS keys disabled for {target_user}: {disabled} [actor={_request_actor.get()}]")
         return json.dumps({"status": "contained", "user": target_user, "keys_disabled": disabled})
     except Exception as e:
         return json.dumps({"error": f"AWS IAM error: {e}"})
@@ -1252,7 +1255,7 @@ def revoke_aws_sts_sessions(target_user: str, confirm: bool = False) -> str:
                            "Condition": {"DateLessThan": {"aws:TokenIssueTime": now}}}]
         })
         iam.put_user_policy(UserName=target_user, PolicyName="SOAR_Emergency_Session_Revocation", PolicyDocument=policy)
-        logger.info(f"AWS STS sessions revoked for {target_user} (tokens before {now})")
+        logger.info(f"AWS STS sessions revoked for {target_user} (tokens before {now}) [actor={_request_actor.get()}]")
         return json.dumps({"status": "sessions_revoked", "user": target_user, "cutoff": now})
     except Exception as e:
         return json.dumps({"error": f"AWS STS error: {e}"})
@@ -1286,7 +1289,7 @@ def revoke_gcp_sa_keys(project_id: str = "", service_account_email: str = "", co
             del_resp = requests.delete(f"https://iam.googleapis.com/v1/{key_name}", headers=headers, timeout=15)
             if del_resp.status_code in (200, 204):
                 deleted.append(key_name.split("/")[-1])
-        logger.info(f"GCP SA keys deleted for {service_account_email}: {deleted}")
+        logger.info(f"GCP SA keys deleted for {service_account_email}: {deleted} [actor={_request_actor.get()}]")
         return json.dumps({"status": "contained", "sa": service_account_email, "keys_deleted": deleted})
     except Exception as e:
         return json.dumps({"error": f"GCP IAM error: {e}"})
@@ -1347,7 +1350,7 @@ def isolate_crowdstrike_host(hostname: str = "", device_id: str = "", confirm: b
         )
 
         if contain_resp.status_code == 202:
-            logger.info(f"CrowdStrike: host {device_id} ({hostname}) isolated")
+            logger.info(f"CrowdStrike: host {device_id} ({hostname}) isolated [actor={_request_actor.get()}]")
             return json.dumps({"status": "isolated", "device_id": device_id, "hostname": hostname})
         return json.dumps({"error": f"Containment failed [{contain_resp.status_code}]", "detail": contain_resp.text[:300]})
     except RuntimeError as e:
@@ -1380,7 +1383,7 @@ def create_soar_case(
                 "environment": "Default Environment",
             },
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code in (200, 201):
             data = resp.json() if resp.text else {}
@@ -1419,7 +1422,7 @@ def update_soar_case(
                 headers=_siemplify_headers(),
                 json={"caseId": int(case_id), "comment": comment},
                 timeout=15,
-                verify=False,
+                verify=True,
             )
             results.append(f"Comment: {resp.status_code}")
 
@@ -1429,7 +1432,7 @@ def update_soar_case(
                 headers=_siemplify_headers(),
                 json={"caseId": int(case_id), "priority": _SIEMPLIFY_PRIORITY.get(priority.upper(), 60)},
                 timeout=15,
-                verify=False,
+                verify=True,
             )
             results.append(f"Priority: {resp.status_code}")
 
@@ -1439,7 +1442,7 @@ def update_soar_case(
                 headers=_siemplify_headers(),
                 json={"caseId": int(case_id), "rootCause": close_reason or "Resolved", "comment": close_reason or "Closed via MCP"},
                 timeout=15,
-                verify=False,
+                verify=True,
             )
             results.append(f"Close: {resp.status_code}")
 
@@ -1996,7 +1999,7 @@ def list_cases() -> str:
             headers=_siemplify_headers(),
             json={"pageSize": 100, "pageNumber": 0},
             timeout=30,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -2028,7 +2031,7 @@ def get_case_alerts(case_id: str) -> str:
             f"{SIEMPLIFY_BASE}/cases/GetCaseFullDetails/{case_id}",
             headers=_siemplify_headers(),
             timeout=30,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -2064,7 +2067,7 @@ def add_case_comment(case_id: str, comment: str) -> str:
             headers=_siemplify_headers(),
             json={"caseId": int(case_id), "comment": comment},
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code in (200, 201):
             logger.info(f"Comment added to Siemplify case {case_id}")
@@ -2590,7 +2593,7 @@ def list_case_comments(case_id: str, page_size: int = 50) -> str:
             headers=_siemplify_headers(),
             params={"CaseId": case_id},
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -2612,7 +2615,7 @@ def update_case_priority(case_id: str, priority: str) -> str:
             headers=_siemplify_headers(),
             json={"caseId": int(case_id), "priority": _SIEMPLIFY_PRIORITY.get(priority.upper(), 60)},
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code in (200, 201):
             logger.info(f"Siemplify case {case_id} priority updated to {priority}")
@@ -2633,7 +2636,7 @@ def close_case(case_id: str, reason: str = "Resolved") -> str:
             headers=_siemplify_headers(),
             json={"caseId": int(case_id), "rootCause": reason, "comment": reason},
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code in (200, 201):
             logger.info(f"Siemplify case {case_id} closed: {reason}")
@@ -2657,7 +2660,7 @@ def get_case_overview() -> str:
             headers=_siemplify_headers(),
             json={"pageSize": 200, "pageNumber": 0},
             timeout=30,
-            verify=False,
+            verify=True,
         )
         if resp.status_code != 200:
             return json.dumps({"error": f"Siemplify API [{resp.status_code}]", "detail": resp.text[:300]})
@@ -2688,7 +2691,7 @@ def list_playbooks(page_size: int = 50) -> str:
             headers=_siemplify_headers(),
             json={},
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -2709,7 +2712,7 @@ def get_playbook(playbook_id: str) -> str:
             f"{SIEMPLIFY_BASE}/playbooks/GetWorkflowFullInfoByIdentifier/{playbook_id}",
             headers=_siemplify_headers(),
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             return resp.text
@@ -3162,7 +3165,7 @@ def secops_list_cases(limit: int = 100) -> str:
             headers=_siemplify_headers(),
             json={"pageSize": limit, "pageNumber": 0},
             timeout=30,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -3183,7 +3186,7 @@ def secops_get_case(case_id: str) -> str:
             f"{SIEMPLIFY_BASE}/cases/GetCaseFullDetails/{case_id}",
             headers=_siemplify_headers(),
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             return resp.text
@@ -3215,7 +3218,7 @@ def secops_get_case_alert(case_id: str, alert_id: str) -> str:
             headers=_siemplify_headers(),
             params={"alertId": alert_id, "caseId": case_id},
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             return resp.text
@@ -3240,7 +3243,7 @@ def secops_update_case_alert(case_id: str, alert_id: str, status: str = "", seve
             headers=_siemplify_headers(),
             json=body,
             timeout=15,
-            verify=False,
+            verify=True,
         )
         if resp.status_code in (200, 201):
             return json.dumps({"status": "updated", "alert_id": alert_id})
@@ -3385,12 +3388,15 @@ def bigquery_get_table_info(project_id: str = "", dataset_id: str = "", table_id
 
 @app_mcp.tool()
 def bigquery_execute_sql(query: str, project_id: str = "", max_results: int = 1000, dry_run: bool = False) -> str:
-    """Execute a SQL query in BigQuery. Returns result rows and stats."""
+    """Execute a read-only SQL query in BigQuery. Returns result rows and stats. DDL/DML statements are blocked."""
+    _BQ_BLOCKED = re.compile(r"^\s*(DROP|DELETE|INSERT|UPDATE|CREATE|ALTER|TRUNCATE|MERGE|CALL|GRANT|REVOKE)\b", re.IGNORECASE)
     try:
         from google.cloud import bigquery
         project_id = project_id or SECOPS_PROJECT_ID
         if not query or len(query.strip()) < 5:
             return json.dumps({"error": "SQL query is required"})
+        if _BQ_BLOCKED.match(query.strip()):
+            return json.dumps({"error": "Only SELECT queries are allowed. DDL/DML statements are blocked."})
         max_results = min(max(1, max_results), 100000)
         bq = bigquery.Client(project=project_id)
         job_config = bigquery.QueryJobConfig(dry_run=dry_run)
@@ -3603,6 +3609,7 @@ async def api_chat_stream(request: StarletteRequest):
     user_email = _verify_google_token(request)
     if not user_email:
         return JSONResponse({"error": "Unauthorized. Please sign in with Google."}, status_code=401)
+    _request_actor.set(user_email)
 
     async def event_generator():
         try:
@@ -3804,9 +3811,10 @@ async def api_auth_config(request: StarletteRequest):
 
 
 def _verify_google_token(request: StarletteRequest) -> str | None:
-    """Verify Google ID token. Returns email on success, None on failure. Skips check if OAUTH_CLIENT_ID not set."""
+    """Verify Google ID token. Returns email on success, None on failure."""
     if not OAUTH_CLIENT_ID:
-        return "dev"
+        logger.warning("OAUTH_CLIENT_ID not configured -- all web UI requests rejected")
+        return None
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         return None
@@ -3833,6 +3841,7 @@ async def api_chat(request: StarletteRequest):
     user_email = _verify_google_token(request)
     if not user_email:
         return JSONResponse({"error": "Unauthorized. Please sign in with Google."}, status_code=401)
+    _request_actor.set(user_email)
 
     try:
         body = await request.json()
@@ -4467,7 +4476,7 @@ def get_last_cases(count: int = 10, n: int = 0, N: int = 0, num_cases: int = 0, 
             headers=_siemplify_headers(),
             json={"pageSize": count, "pageNumber": 0},
             timeout=30,
-            verify=False,
+            verify=True,
         )
         if resp.status_code == 200:
             data = resp.json()
