@@ -127,28 +127,28 @@ You need to get the MCP Server code from GitHub onto your computer. Pick the eas
 ### Option A: Download as ZIP (No Git Required — Easiest)
 
 1. Open your browser
-2. Go to: **https://github.com/dadohen/Google-Native-MCP-Server**
+2. Go to: **https://github.com/dadohen/MCP-Boss**
 3. Look for the big green button that says **"<> Code"**
 4. Click it
 5. In the dropdown, click **"Download ZIP"**
-6. Your browser downloads a file called `Google-Native-MCP-Server-main.zip`
+6. Your browser downloads a file called `MCP-Boss-main.zip`
 7. Find it in your **Downloads** folder
 8. **Unzip it:**
    - **Mac:** Double-click the ZIP file
    - **Windows:** Right-click → "Extract All"
-   - **Linux:** `unzip Google-Native-MCP-Server-main.zip`
+   - **Linux:** `unzip MCP-Boss-main.zip`
 9. Open your terminal and go to the folder:
 
 ```bash
-cd ~/Downloads/Google-Native-MCP-Server-main
+cd ~/Downloads/MCP-Boss-main
 ```
 
 ### Option B: Use Git Clone
 
 ```bash
 cd ~/Desktop
-git clone https://github.com/dadohen/Google-Native-MCP-Server.git
-cd Google-Native-MCP-Server
+git clone https://github.com/dadohen/MCP-Boss.git
+cd MCP-Boss
 ```
 
 **Don't have git?** Just use Option A. It's the same code.
@@ -615,7 +615,7 @@ Want to see your server in a web browser instead of the terminal?
 If the code gets updated on GitHub:
 
 ```bash
-cd ~/Desktop/Google-Native-MCP-Server    # or wherever you downloaded it
+cd ~/Desktop/MCP-Boss    # or wherever you downloaded it
 git pull                                   # get the latest code
 
 PROJECT_ID=$(gcloud config get-value project)
@@ -699,8 +699,8 @@ The entire deployment in one block:
 # Setup
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
-git clone https://github.com/dadohen/Google-Native-MCP-Server.git
-cd Google-Native-MCP-Server
+git clone https://github.com/dadohen/MCP-Boss.git
+cd MCP-Boss
 
 # Enable APIs
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com securitycenter.googleapis.com logging.googleapis.com aiplatform.googleapis.com chronicle.googleapis.com
