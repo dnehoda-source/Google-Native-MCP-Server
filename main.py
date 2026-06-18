@@ -4512,3 +4512,198 @@ def get_last_detections(count: int = 5, n: int = 0, N: int = 0, num_detections: 
         return json.dumps({"count": len(detections), "detections": detections})
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════
+# 🏹 ARSENAL — governed, reversible remediation off a SecOps detection
+# ═══════════════════════════════════════════════════════════════
+# Phase 1 (recommend) → Phase 3 (classify autonomy) → Phase 2 (execute + rollback).
+# See arsenal/ for the implementation and tests. Arsenal calls the tools below by
+# name through an injected runner; nothing here imports back into Arsenal's logic.
+
+from arsenal.contracts import SecOpsTenant as _ArsenalTenant
+from arsenal.orchestrator import ArsenalOrchestrator as _ArsenalOrchestrator
+
+# Tool names Arsenal may dispatch: the 8 ActionKind values + the read tools the
+# connector uses. Each maps to the real @app_mcp.tool() function defined above.
+_ARSENAL_TOOLS = {
+    "suspend_okta_user": suspend_okta_user,
+    "revoke_azure_ad_sessions": revoke_azure_ad_sessions,
+    "revoke_aws_access_keys": revoke_aws_access_keys,
+    "revoke_gcp_sa_keys": revoke_gcp_sa_keys,
+    "isolate_crowdstrike_host": isolate_crowdstrike_host,
+    "purge_email_o365": purge_email_o365,
+    "create_soar_case": create_soar_case,
+    "add_case_comment": add_case_comment,
+    "list_secops_detections": list_secops_detections,
+    "list_cases": list_cases,
+    "get_case_alerts": get_case_alerts,
+}
+
+
+def _arsenal_tool_runner(name: str, **args) -> str:
+    fn = _ARSENAL_TOOLS.get(name)
+    if fn is None:
+        return json.dumps({"error": f"Arsenal: tool {name!r} not dispatchable"})
+    try:
+        return fn(**args)
+    except Exception as e:
+        return json.dumps({"error": f"{name} failed: {e}"})
+
+
+def _arsenal_orchestrator(tenant_project_id="", tenant_customer_id="", tenant_region="", approver=None):
+    # Default to this server's own SecOps tenant; override for bring-your-own-SecOps.
+    tenant = _ArsenalTenant(
+        name=tenant_customer_id or SECOPS_CUSTOMER_ID,
+        project_id=tenant_project_id or SECOPS_PROJECT_ID,
+        customer_id=tenant_customer_id or SECOPS_CUSTOMER_ID,
+        region=tenant_region or SECOPS_REGION,
+    )
+    return _ArsenalOrchestrator(tenant, _arsenal_tool_runner, approver=approver)
+
+
+def _arsenal_parse_detection(detection_json: str):
+    try:
+        d = json.loads(detection_json) if detection_json else {}
+    except Exception as e:
+        return None, json.dumps({"error": f"bad detection_json: {e}"})
+    if not isinstance(d, dict):
+        return None, json.dumps({"error": "detection_json must be a JSON object"})
+    return d, None
+
+
+# ── Live approval gate: GATED steps create real /api/approvals entries that a
+# human approves; the gate then executes the tool. Degrades gracefully to an
+# inline approver if the gate can't be built (never blocks server boot).
+_ARSENAL_GATE = None
+try:
+    from policy_and_approvals.bootstrap import build_default_gate as _build_gate
+    from policy_and_approvals.decorator import RAW_TOOLS as _RAW_TOOLS
+    from policy_and_approvals.api import register_http_routes as _register_approval_routes
+    from policy_and_approvals.models import (
+        ToolCall as _ToolCall,
+        PolicyDecision as _PolicyDecision,
+        Decision as _Decision,
+    )
+
+    _ARSENAL_GATE = _build_gate(
+        audit_path=os.environ.get("MCP_BOSS_AUDIT_PATH", "/tmp/mcp-boss-audit.jsonl")
+    )
+    # Make the containment + case tools executable when an approval is granted.
+    for _an, _af in _ARSENAL_TOOLS.items():
+        _RAW_TOOLS.setdefault(_an, _af)
+    _register_approval_routes(_starlette_app, _ARSENAL_GATE)
+    logger.info("Arsenal: live approval gate wired; /api/approvals active")
+except Exception as _e:
+    logger.warning("Arsenal: live approval gate unavailable (%s); using inline approver", _e)
+    _ARSENAL_GATE = None
+
+
+def _arsenal_broker_approver(collected: list):
+    """Approver that registers each gated step as a PENDING approval in the live
+    broker and returns False (so the executor holds it). The human approves via
+    /api/approvals/{id}/decide and gate.execute_approved runs the tool."""
+
+    def approver(step, preview):
+        try:
+            call = _ToolCall(
+                tool_name=step.kind.value,
+                args={**(step.args or {}), "confirm": True},
+                actor="arsenal",
+                entities=(step.blast_radius or {}),
+                reasoning=step.rationale or "",
+            )
+            decision = _PolicyDecision(
+                decision=_Decision.REQUIRE_APPROVAL,
+                matched_rule="arsenal_remediation",
+                reason="Arsenal gated remediation step",
+                approver_groups=[],
+            )
+            req = _ARSENAL_GATE.broker.request(call, decision, preview)
+            collected.append({
+                "approval_id": req.approval_id,
+                "kind": step.kind.value,
+                "reversible": step.reversible,
+            })
+        except Exception as e:
+            collected.append({"error": str(e), "kind": step.kind.value})
+        return False
+
+    return approver
+
+
+@app_mcp.tool()
+def arsenal_recommend(detection_json: str = "", tenant_project_id: str = "", tenant_customer_id: str = "", tenant_region: str = "") -> str:
+    """Arsenal (advisory): turn a SecOps detection into a recommended remediation plan with autonomy classes (auto/gated/blocked), the matched playbook, and an explanation. Executes nothing. Pass the detection as JSON; optionally point at another SecOps tenant."""
+    detection, err = _arsenal_parse_detection(detection_json)
+    if err:
+        return err
+    orch = _arsenal_orchestrator(tenant_project_id, tenant_customer_id, tenant_region)
+    return json.dumps(orch.explain(detection), default=str)
+
+
+@app_mcp.tool()
+def arsenal_remediate(detection_json: str = "", dry_run: bool = True, approve_gated: bool = False, tenant_project_id: str = "", tenant_customer_id: str = "", tenant_region: str = "") -> str:
+    """Arsenal (govern + execute): remediate a SecOps detection. dry_run=True (default) returns the plan without executing. dry_run=False runs the AUTO slice (reversible, low-blast: case docs + softDelete email purge) immediately; destructive human-gated steps are registered as PENDING approvals in the live gate (approve via /api/approvals/{id}/decide, or set approve_gated=True to execute inline). Irreversible/BLOCKED steps never run. Returns per-step results plus any pending_approvals."""
+    detection, err = _arsenal_parse_detection(detection_json)
+    if err:
+        return err
+    if dry_run:
+        out = _arsenal_orchestrator(tenant_project_id, tenant_customer_id, tenant_region).explain(detection)
+        out["dry_run"] = True
+        return json.dumps(out, default=str)
+
+    pending: list = []
+    if approve_gated:
+        approver = (lambda step, preview: True)            # operator override: execute inline
+        mode = "inline_override"
+    elif _ARSENAL_GATE is not None:
+        approver = _arsenal_broker_approver(pending)        # live async: create real approvals
+        mode = "live_gate"
+    else:
+        approver = (lambda step, preview: False)            # no gate: hold gated steps
+        mode = "no_gate"
+
+    orch = _arsenal_orchestrator(tenant_project_id, tenant_customer_id, tenant_region, approver=approver)
+    res = orch.remediate(detection)
+    plan, results = res["plan"], res["results"]
+    return json.dumps({
+        "plan_id": plan.plan_id,
+        "playbook": res["playbook"],
+        "summary": plan.summary,
+        "dry_run": False,
+        "mode": mode,
+        "pending_approvals": pending,
+        "steps": [
+            {
+                "kind": s.kind.value,
+                "autonomy": s.autonomy.value,
+                "state": r.state.value,
+                "reversible": (r.rollback.reversible if r.rollback else s.reversible),
+                "reversal": (r.rollback.note if r.rollback else s.reversal_hint),
+                "output": (r.output[:300] if r.output else ""),
+            }
+            for s, r in zip(plan.steps, results)
+        ],
+    }, default=str)
+
+
+@app_mcp.tool()
+def arsenal_pending_approvals() -> str:
+    """List Arsenal remediation steps awaiting human approval in the live gate. Approve or deny via /api/approvals/{approval_id}/decide; on approval the gate executes the containment action."""
+    if _ARSENAL_GATE is None:
+        return json.dumps({"error": "live approval gate not active", "pending": []})
+    items = _ARSENAL_GATE.broker.pending()
+    return json.dumps({
+        "count": len(items),
+        "pending": [
+            {
+                "approval_id": r.approval_id,
+                "tool": r.tool_call.tool_name,
+                "entities": r.tool_call.entities,
+                "reversible": r.dry_run.reversible,
+                "reversal_hint": r.dry_run.reversal_hint,
+            }
+            for r in items
+        ],
+    }, default=str)
