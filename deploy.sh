@@ -25,7 +25,7 @@ set -euo pipefail
 
 PROJECT_ID="${GCP_PROJECT_ID:-your-project-id}"
 REGION="${GCP_REGION:-us-central1}"
-SERVICE_NAME="mcp-boss-ts"
+SERVICE_NAME="arsenal"
 SA_NAME="native-mcp-sa"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_URL="gcr.io/${PROJECT_ID}/${SERVICE_NAME}:latest"
@@ -162,12 +162,17 @@ DEPLOY_CMD="gcloud run deploy ${SERVICE_NAME} \
     --min-instances 0 \
     --max-instances 10 \
     --timeout 120 \
-    --set-env-vars=SECOPS_PROJECT_ID=${SECOPS_PROJECT_ID},SECOPS_CUSTOMER_ID=${SECOPS_CUSTOMER_ID},SECOPS_REGION=${SECOPS_REGION} \
+    --set-env-vars=SECOPS_PROJECT_ID=${SECOPS_PROJECT_ID},SECOPS_CUSTOMER_ID=${SECOPS_CUSTOMER_ID},SECOPS_REGION=${SECOPS_REGION},SIEMPLIFY_URL=https://linus2.siemplify-soar.com \
     --project=${PROJECT_ID} \
     --quiet"
 
 if gcloud secrets describe "gti-api-key" --project="${PROJECT_ID}" > /dev/null 2>&1; then
     DEPLOY_CMD="${DEPLOY_CMD} --set-secrets=GTI_API_KEY=gti-api-key:latest"
+fi
+
+# Add Siemplify API key secret if it exists
+if gcloud secrets describe "siemplify-api-key" --project="${PROJECT_ID}" > /dev/null 2>&1; then
+    DEPLOY_CMD="${DEPLOY_CMD} --set-secrets=SIEMPLIFY_API_KEY=siemplify-api-key:latest"
 fi
 
 eval "${DEPLOY_CMD}"
